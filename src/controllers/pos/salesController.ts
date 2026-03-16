@@ -14,6 +14,7 @@ async function createSale(req: Request, res: Response): Promise<void> {
       total_amount,
       customer_name,
       customer_phone,
+      customer_id,
       notes
     } = req.body;
 
@@ -152,6 +153,27 @@ async function createSale(req: Request, res: Response): Promise<void> {
       if (movementError) {
         console.error('❌ Inventory movement error:', movementError);
         // Don't throw here, inventory movement is not critical
+      }
+    }
+
+    // If payment method is credit, record a charge in credit_ledger
+    if (payment_method === 'credit' && customer_id) {
+      const { error: ledgerError } = await supabase
+        .from('credit_ledger')
+        .insert({
+          company_id: companyId,
+          customer_id,
+          sale_id: sale.id,
+          type: 'charge',
+          amount: total_amount,
+          notes: `Sale ${receipt_number}`,
+          created_by: isStaff ? null : userId
+        });
+
+      if (ledgerError) {
+        console.error('❌ Credit ledger error (non-critical):', ledgerError);
+      } else {
+        console.log('✅ Credit charge recorded for customer:', customer_id);
       }
     }
 

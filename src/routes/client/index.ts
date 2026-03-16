@@ -14,6 +14,7 @@ import inventoryTransferRoutes from './inventorytransfer';
 import ingredientsRoutes from './ingredients';
 import recipesRoutes from './recipes';
 import manufacturingRoutes from './manufacturing';
+import utangRoutes from './utang';
 
 const router = express.Router();
 
@@ -135,5 +136,6 @@ router.use('/inventory-transfer', inventoryTransferRoutes);
 router.use('/ingredients', ingredientsRoutes);
 router.use('/recipes', recipesRoutes);
 router.use('/manufacturing', manufacturingRoutes);
+router.use('/utang', utangRoutes);
 
 export default router;

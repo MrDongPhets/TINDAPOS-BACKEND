@@ -226,6 +226,36 @@ CREATE TABLE public.products (
   CONSTRAINT fk_products_store FOREIGN KEY (store_id) REFERENCES public.stores(id),
   CONSTRAINT fk_products_created_by FOREIGN KEY (created_by) REFERENCES public.users(id)
 );
+CREATE TABLE public.customers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL,
+  name character varying NOT NULL,
+  phone character varying,
+  notes text,
+  is_active boolean DEFAULT true,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customers_pkey PRIMARY KEY (id),
+  CONSTRAINT customers_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
+  CONSTRAINT customers_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
+CREATE TABLE public.credit_ledger (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL,
+  customer_id uuid NOT NULL,
+  sale_id uuid,
+  type character varying NOT NULL CHECK (type::text = ANY (ARRAY['charge'::character varying, 'payment'::character varying]::text[])),
+  amount numeric NOT NULL,
+  notes text,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT credit_ledger_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_ledger_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
+  CONSTRAINT credit_ledger_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
+  CONSTRAINT credit_ledger_sale_id_fkey FOREIGN KEY (sale_id) REFERENCES public.sales(id),
+  CONSTRAINT credit_ledger_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id)
+);
 CREATE TABLE public.sales (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   company_id uuid,
