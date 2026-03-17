@@ -53,7 +53,8 @@ async function getAllSales(req: Request, res: Response): Promise<void> {
         notes,
         created_at,
         staff:staff_id(id, name, staff_id),
-        stores:store_id(id, name)
+        stores:store_id(id, name),
+        created_by_user:created_by(id, name, email)
       `, { count: 'exact' })
       .eq('company_id', companyId);
 

@@ -111,7 +111,8 @@ async function getRecentSales(req: Request, res: Response): Promise<void> {
         created_at,
         store_id,
         staff(name),
-        stores(name)
+        stores(name),
+        created_by_user:created_by(name)
       `)
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
@@ -133,7 +134,7 @@ async function getRecentSales(req: Request, res: Response): Promise<void> {
       date: sale.created_at,
       amount: parseFloat(String(sale.total_amount)),
       items: sale.items_count || 1,
-      staff: sale.staff?.name || 'Unknown',
+      staff: sale.staff?.name || (sale as any).created_by_user?.name || 'Manager',
       store: sale.stores?.name || 'Unknown Store'
     })) || [];
 
