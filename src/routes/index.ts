@@ -10,6 +10,7 @@ import posRoutes from './pos/index';
 import staffRoutes from './staff/index';
 import reportsRoutes from './reports/index';
 import setupRoutes from './setup';
+import billingRoutes from './billing/index';
 
 const router = express.Router();
 
@@ -79,6 +80,7 @@ router.use('/setup', setupRoutes);
 router.use('/health', healthRoute);
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
+router.use('/billing', billingRoutes);
 router.use('/client', clientRoutes);
 router.use('/pos', posRoutes);
 router.use('/staff', staffRoutes);

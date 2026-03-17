@@ -18,6 +18,23 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Middleware
 app.use(configureCORS());
+
+// Capture raw body for PayMongo webhook signature verification
+app.use((req: Request, res: Response, next) => {
+  if (req.path === '/billing/webhook') {
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      (req as any).rawBody = raw;
+      try { (req as any).body = JSON.parse(raw); } catch { (req as any).body = {}; }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(requestLogger);
