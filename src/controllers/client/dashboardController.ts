@@ -110,8 +110,8 @@ async function getRecentSales(req: Request, res: Response): Promise<void> {
         items_count,
         created_at,
         store_id,
-        staff!inner(name),
-        stores!inner(name)
+        staff(name),
+        stores(name)
       `)
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
