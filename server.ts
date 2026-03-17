@@ -103,6 +103,11 @@ app.get('/diagnostic', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
 });
 
+// Health check endpoint (used by frontend to detect real connectivity)
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true });
+});
+
 // Mount all routes
 app.use('/', routes);
 

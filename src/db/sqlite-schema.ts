@@ -325,6 +325,36 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Customers (Utang Tracker)
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      notes TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_by TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id)
+    );
+
+    -- Credit Ledger (Utang Tracker)
+    CREATE TABLE IF NOT EXISTS credit_ledger (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      sale_id TEXT,
+      type TEXT NOT NULL CHECK (type IN ('charge', 'payment')),
+      amount REAL NOT NULL,
+      notes TEXT,
+      created_by TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (customer_id) REFERENCES customers(id),
+      FOREIGN KEY (sale_id) REFERENCES sales(id)
+    );
+
     -- Store Requests
     CREATE TABLE IF NOT EXISTS store_requests (
       id TEXT PRIMARY KEY,
@@ -366,6 +396,8 @@ export function initializeSQLiteSchema(db: Database.Database): void {
   try { db.exec('ALTER TABLE companies ADD COLUMN trial_end_date TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE companies ADD COLUMN subscription_end_date TEXT'); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE companies ADD COLUMN subscription_plan TEXT DEFAULT 'basic'"); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE sales ADD COLUMN customer_id TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT'); } catch { /* already exists */ }
 
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];
