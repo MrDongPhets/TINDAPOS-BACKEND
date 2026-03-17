@@ -10,6 +10,7 @@ import { authenticateToken } from '../../middleware/auth';
 import { verifyToken, getMe, cleanup } from '../../controllers/auth/verifyController';
 import { googleRedirect, googleCallback } from '../../controllers/auth/googleController';
 import { forgotPassword, resetPassword } from '../../controllers/auth/forgotPasswordController';
+import { registrationLimiter, authLimiter } from '../../middleware/rateLimiter';
 
 const router = express.Router();
 
@@ -225,7 +226,7 @@ router.post('/logout', logout);
  *       500:
  *         description: Server error
  */
-router.post('/register-company', registerCompany);
+router.post('/register-company', registrationLimiter, registerCompany);
 
 /**
  * @swagger
@@ -268,8 +269,8 @@ router.get('/google', googleRedirect);
 router.get('/google/callback', googleCallback);
 
 // Password reset
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password', resetPassword);
+router.post('/forgot-password', authLimiter, forgotPassword);
+router.post('/reset-password', authLimiter, resetPassword);
 
 // Get current user's full profile (used after Google OAuth token redirect)
 router.get('/me', authenticateToken, getMe);

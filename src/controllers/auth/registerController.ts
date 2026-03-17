@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { BCRYPT_ROUNDS } from '../../config/constants';
+import { validateEmail } from '../../utils/emailValidation';
 
 async function registerCompany(req: Request, res: Response): Promise<void> {
   try {
@@ -15,6 +16,22 @@ async function registerCompany(req: Request, res: Response): Promise<void> {
         code: 'MISSING_FIELDS'
       });
       return;
+    }
+
+    // Validate company email
+    const companyEmailCheck = await validateEmail(company.email);
+    if (!companyEmailCheck.valid) {
+      res.status(400).json({ error: companyEmailCheck.reason, code: 'INVALID_EMAIL' });
+      return;
+    }
+
+    // Validate user email (only if different from company email)
+    if (user.email.toLowerCase() !== company.email.toLowerCase()) {
+      const userEmailCheck = await validateEmail(user.email);
+      if (!userEmailCheck.valid) {
+        res.status(400).json({ error: userEmailCheck.reason, code: 'INVALID_EMAIL' });
+        return;
+      }
     }
 
     const supabase = getDb();
