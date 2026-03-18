@@ -5,7 +5,8 @@ import {
   getSaleDetails,
   getSalesSummary,
   voidSale,
-  getRecentSales
+  getRecentSales,
+  exportSales
 } from '../../controllers/client/salesController';
 
 const router = express.Router();
@@ -18,6 +19,9 @@ router.get('/summary', getSalesSummary);
 
 // GET /client/sales/recent - Get recent sales (last 24 hours)
 router.get('/recent', getRecentSales);
+
+// GET /client/sales/export - Export sales with item names
+router.get('/export', exportSales);
 
 // GET /client/sales/:id - Get sale details with items
 router.get('/:id', getSaleDetails);

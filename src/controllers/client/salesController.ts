@@ -422,10 +422,54 @@ async function getRecentSales(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Export sales with item names in one query
+async function exportSales(req: Request, res: Response): Promise<void> {
+  try {
+    const companyId = req.user!.company_id;
+    const { store_id, start_date, end_date, payment_method, search } = req.query;
+    const supabase = getDb();
+
+    const { data: stores } = await supabase
+      .from('stores').select('id').eq('company_id', companyId);
+    const storeIds = stores?.map((s: { id: string }) => s.id) || [];
+    if (storeIds.length === 0) { res.json({ sales: [] }); return; }
+
+    let query = supabase
+      .from('sales')
+      .select(`
+        id, receipt_number, total_amount, discount_amount, payment_method,
+        customer_name, created_at,
+        staff:staff_id(name),
+        stores:store_id(name),
+        sales_items(quantity, unit_price, products(name))
+      `)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false })
+      .limit(10000);
+
+    if (store_id) query = query.eq('store_id', store_id as string);
+    else query = query.in('store_id', storeIds);
+    if (payment_method) query = query.eq('payment_method', payment_method as string);
+    if (start_date) query = query.gte('created_at', start_date as string);
+    if (end_date) query = query.lte('created_at', end_date as string);
+    if (search) query = query.or(`receipt_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+
+    const { data: sales, error } = await query;
+    if (error) throw error;
+
+    console.log('✅ Export sales fetched:', sales?.length);
+    res.json({ sales: sales || [] });
+  } catch (error) {
+    console.error('Export sales error:', error);
+    res.status(500).json({ error: 'Failed to export sales', code: 'EXPORT_SALES_ERROR' });
+  }
+}
+
 export {
   getAllSales,
   getSaleDetails,
   getSalesSummary,
   voidSale,
-  getRecentSales
+  getRecentSales,
+  exportSales
 };
