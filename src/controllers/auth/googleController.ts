@@ -6,10 +6,9 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 
 function getRedirectUri(): string {
-  return process.env.GOOGLE_REDIRECT_URI
-    || (process.env.NODE_ENV === 'production'
-      ? 'https://tindaposapp.mustarddigitals.com/auth/google/callback'
-      : 'http://localhost:3001/auth/google/callback');
+  return process.env.NODE_ENV === 'production'
+    ? 'https://kitaposapi.mrdongphets.com/auth/google/callback'
+    : 'http://localhost:3001/auth/google/callback';
 }
 
 function getFrontendUrl(): string {
