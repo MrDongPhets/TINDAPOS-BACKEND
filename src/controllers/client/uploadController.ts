@@ -4,6 +4,7 @@ import { getDb } from '../../config/database';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import sharp from 'sharp';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 // Configure R2 client
@@ -35,9 +36,9 @@ const storage = multer.memoryStorage();
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 20 * 1024 * 1024, // 20MB — sharp compresses before R2 upload
   },
-  fileFilter: (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
@@ -73,10 +74,22 @@ async function uploadImage(req: Request, res: Response): Promise<void> {
       size: file.size
     });
 
+    // Compress image (skip GIF — may be animated)
+    let fileBuffer = file.buffer;
+    let fileMime = file.mimetype;
+    if (file.mimetype !== 'image/gif') {
+      fileBuffer = await sharp(file.buffer)
+        .resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      fileMime = 'image/jpeg';
+      console.log(`📸 Compressed: ${file.size} → ${fileBuffer.length} bytes`);
+    }
+
     // Generate unique filename under stores/{companyId}/{folder}/
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
-    const fileExt = path.extname(file.originalname);
+    const fileExt = fileMime === 'image/gif' ? path.extname(file.originalname) : '.jpg';
     const fileName = `stores/${companyId}/${folder}/${timestamp}_${randomString}${fileExt}`;
 
     console.log('📸 Generated filename:', fileName);
@@ -92,7 +105,7 @@ async function uploadImage(req: Request, res: Response): Promise<void> {
 
       const localFileName = `${timestamp}_${randomString}${fileExt}`;
       const localFilePath = path.join(uploadsDir, localFileName);
-      fs.writeFileSync(localFilePath, file.buffer);
+      fs.writeFileSync(localFilePath, fileBuffer);
 
       publicUrl = `/uploads/stores/${companyId!}/${folder}/${localFileName}`;
       console.log('📸 File saved locally:', localFilePath);
@@ -101,8 +114,8 @@ async function uploadImage(req: Request, res: Response): Promise<void> {
       const uploadCommand = new PutObjectCommand({
         Bucket: R2_BUCKET,
         Key: fileName,
-        Body: file.buffer,
-        ContentType: file.mimetype,
+        Body: fileBuffer,
+        ContentType: fileMime,
       });
 
       await r2Client.send(uploadCommand);
@@ -118,8 +131,8 @@ async function uploadImage(req: Request, res: Response): Promise<void> {
           .insert([{
             filename: fileName,
             original_name: file.originalname,
-            mime_type: file.mimetype,
-            file_size: file.size,
+            mime_type: fileMime,
+            file_size: fileBuffer.length,
             public_url: publicUrl,
             uploaded_by: userId,
             company_id: companyId,
@@ -139,8 +152,8 @@ async function uploadImage(req: Request, res: Response): Promise<void> {
       url: publicUrl,
       filename: fileName,
       folder,
-      size: file.size,
-      type: file.mimetype
+      size: fileBuffer.length,
+      type: fileMime
     });
 
   } catch (error) {
