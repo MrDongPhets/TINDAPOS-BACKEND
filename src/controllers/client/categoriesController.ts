@@ -21,7 +21,7 @@ async function getCategories(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Get categories with product count - REMOVE the is_active filter
+    // Get categories with product count — include inactive so admin can manage them
     const { data: categories, error, count } = await supabase
       .from('categories')
       .select(`
@@ -29,7 +29,6 @@ async function getCategories(req: Request, res: Response): Promise<void> {
         products(count)
       `, { count: 'exact' })
       .in('store_id', storeIds)
-      // .eq('is_active', true)  <-- REMOVE THIS LINE
       .order('name', { ascending: true });
 
     if (error) {

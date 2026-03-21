@@ -515,11 +515,71 @@ async function getCategories(req: Request, res: Response): Promise<void> {
   }
 }
 
+async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
+  try {
+    const companyId = req.user!.company_id;
+    const { adjustments } = req.body as {
+      adjustments: { product_id: string; new_stock: number; reason?: string }[]
+    };
+    const supabase = getDb();
+
+    if (!adjustments || adjustments.length === 0) {
+      res.status(400).json({ error: 'No adjustments provided' });
+      return;
+    }
+
+    // Verify all products belong to this company
+    const productIds = adjustments.map(a => a.product_id);
+    const { data: stores } = await supabase.from('stores').select('id').eq('company_id', companyId);
+    const storeIds = stores?.map((s: { id: string }) => s.id) || [];
+
+    const { data: ownedProducts } = await supabase
+      .from('products')
+      .select('id, stock_quantity, name')
+      .in('id', productIds)
+      .in('store_id', storeIds);
+
+    const ownedIds = new Set(ownedProducts?.map((p: { id: string }) => p.id) || []);
+    const validAdjustments = adjustments.filter(a => ownedIds.has(a.product_id));
+
+    if (validAdjustments.length === 0) {
+      res.status(403).json({ error: 'No valid products to adjust' });
+      return;
+    }
+
+    // Update each product stock
+    const updates = await Promise.all(
+      validAdjustments.map(async (adj) => {
+        const { error } = await supabase
+          .from('products')
+          .update({ stock_quantity: adj.new_stock, updated_at: new Date().toISOString() })
+          .eq('id', adj.product_id);
+        return { product_id: adj.product_id, success: !error, error };
+      })
+    );
+
+    const failed = updates.filter(u => !u.success);
+    console.log(`✅ Bulk stock adjusted: ${validAdjustments.length - failed.length} products updated`);
+
+    res.json({
+      message: `${validAdjustments.length - failed.length} products updated successfully`,
+      updated: validAdjustments.length - failed.length,
+      failed: failed.length
+    });
+
+  } catch (error) {
+    const err = error as Error;
+    console.error('❌ Bulk adjust stock error:', err);
+    res.status(500).json({ error: 'Failed to adjust stock', code: 'BULK_ADJUST_ERROR' });
+  }
+}
+
 export {
   getProducts,
   getProduct,
   createProduct,
   updateProduct,
   deleteProduct,
-  getCategories
+  getCategories,
+  bulkAdjustStock
 };
