@@ -279,7 +279,10 @@ async function createProduct(req: Request, res: Response): Promise<void> {
         is_composite: is_composite || false,
         created_by: userId
       }])
-      .select()
+      .select(`
+        *,
+        categories(id, name, color, icon)
+      `)
       .single();
 
     if (error) throw error;
