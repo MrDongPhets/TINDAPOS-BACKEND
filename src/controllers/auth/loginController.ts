@@ -88,6 +88,16 @@ async function clientLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Guard: account has no password (e.g. Google OAuth only)
+    if (!userCheck.password) {
+      console.log('❌ Account has no password (OAuth-only account)');
+      res.status(401).json({
+        error: 'This account uses Google login. Please sign in with Google.',
+        code: 'NO_PASSWORD'
+      });
+      return;
+    }
+
     // Verify password
     console.log('🔍 Step 2: Verifying password...');
     const isValidPassword = await bcrypt.compare(password, userCheck.password);
@@ -166,7 +176,7 @@ async function clientLogin(req: Request, res: Response): Promise<void> {
 
   } catch (error) {
     const err = error as Error;
-    console.error('❌ Login error:', err.message);
+    console.error('❌ Login error:', err.name, err.message, err.stack);
     res.status(500).json({
       error: 'Internal server error',
       code: 'INTERNAL_ERROR'
