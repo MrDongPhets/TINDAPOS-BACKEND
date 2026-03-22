@@ -560,9 +560,8 @@ async function getCategories(req: Request, res: Response): Promise<void> {
 async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
   try {
     const companyId = req.user!.company_id;
-    const userId = req.user!.id;
     const { adjustments } = req.body as {
-      adjustments: { product_id: string; new_stock: number; cost_price?: number; selling_price?: number; reason?: string }[]
+      adjustments: { product_id: string; add_qty: number }[]
     };
     const supabase = getDb();
 
@@ -593,34 +592,37 @@ async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Update each product stock and create FIFO batches for increases
+    const userId = req.user!.id;
+
+    // Update each product stock, log movement, and update FIFO batches
     const updates = await Promise.all(
       validAdjustments.map(async (adj) => {
-        const existing = ownedMap.get(adj.product_id);
+        const existing = ownedMap.get(adj.product_id)!;
+        const previousStock = existing.stock_quantity || 0;
+        const newStock = Math.max(0, previousStock + adj.add_qty);
+        const actualDelta = newStock - previousStock; // may differ from add_qty if floored at 0
+
         const { error } = await supabase
           .from('products')
-          .update({ stock_quantity: adj.new_stock, updated_at: new Date().toISOString() })
+          .update({ stock_quantity: newStock, updated_at: new Date().toISOString() })
           .eq('id', adj.product_id);
 
-        // FIFO batch handling for stock increases
-        if (!error && existing && adj.new_stock > (existing.stock_quantity || 0)) {
-          const diff = adj.new_stock - (existing.stock_quantity || 0);
-          const existingCost = existing.cost_price != null ? parseFloat(String(existing.cost_price)) : null;
-          const isNewPrice = adj.cost_price != null && adj.cost_price !== existingCost;
+        if (!error) {
+          // Log to inventory_movements
+          await supabase.from('inventory_movements').insert([{
+            product_id: adj.product_id,
+            store_id: existing.store_id,
+            movement_type: 'adjustment',
+            quantity: Math.abs(actualDelta),
+            previous_stock: previousStock,
+            new_stock: newStock,
+            reference_type: 'bulk_adjustment',
+            notes: `Bulk adjustment: ${adj.add_qty > 0 ? '+' : ''}${adj.add_qty}`,
+            created_by: userId
+          }]);
 
-          if (isNewPrice) {
-            // New price → create a new batch
-            await createBatch(supabase, {
-              product_id: adj.product_id,
-              store_id: existing.store_id,
-              cost_price: adj.cost_price as number,
-              selling_price: adj.selling_price ?? undefined,
-              qty: diff,
-              note: 'Bulk stock adjustment',
-              created_by: userId
-            });
-          } else {
-            // No new price → add qty to latest batch
+          // FIFO batch handling for stock increases only
+          if (adj.add_qty > 0) {
             const { data: latestBatch } = await supabase
               .from('product_batches')
               .select('id, qty_received, qty_remaining')
@@ -634,8 +636,8 @@ async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
               await supabase
                 .from('product_batches')
                 .update({
-                  qty_received: latestBatch.qty_received + diff,
-                  qty_remaining: latestBatch.qty_remaining + diff
+                  qty_received: latestBatch.qty_received + adj.add_qty,
+                  qty_remaining: latestBatch.qty_remaining + adj.add_qty
                 })
                 .eq('id', latestBatch.id);
             }
