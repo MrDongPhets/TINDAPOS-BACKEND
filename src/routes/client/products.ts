@@ -6,7 +6,9 @@ import {
   updateProduct,
   deleteProduct,
   getCategories,
-  bulkAdjustStock
+  bulkAdjustStock,
+  restockProduct,
+  getProductBatches
 } from '../../controllers/client/productsController';
 
 const router = express.Router();
@@ -19,5 +21,7 @@ router.get('/:id', getProduct);
 router.post('/', createProduct);
 router.put('/:id', updateProduct);
 router.delete('/:id', deleteProduct);
+router.post('/:id/restock', restockProduct);
+router.get('/:id/batches', getProductBatches);
 
 export default router;

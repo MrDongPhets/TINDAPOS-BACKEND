@@ -291,9 +291,26 @@ CREATE TABLE public.sales_items (
   discount_amount numeric DEFAULT 0,
   discount_percent numeric DEFAULT 0,
   barcode character varying,
+  cost_price numeric DEFAULT 0,
   CONSTRAINT sales_items_pkey PRIMARY KEY (id),
   CONSTRAINT sales_items_sales_id_fkey FOREIGN KEY (sales_id) REFERENCES public.sales(id),
   CONSTRAINT sales_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
+);
+CREATE TABLE public.product_batches (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  product_id uuid NOT NULL,
+  store_id character varying NOT NULL,
+  cost_price numeric NOT NULL DEFAULT 0,
+  qty_received integer NOT NULL,
+  qty_remaining integer NOT NULL,
+  selling_price numeric DEFAULT 0,
+  received_at timestamp with time zone DEFAULT now(),
+  note text,
+  created_by uuid,
+  CONSTRAINT product_batches_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_batch_product FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE,
+  CONSTRAINT fk_batch_store FOREIGN KEY (store_id) REFERENCES public.stores(id),
+  CONSTRAINT fk_batch_created_by FOREIGN KEY (created_by) REFERENCES public.users(id)
 );
 CREATE TABLE public.staff (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

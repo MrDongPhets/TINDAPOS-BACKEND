@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { createBatch } from '../../services/fifoService';
 
 async function getMovements(req: Request, res: Response): Promise<void> {
   try {
@@ -67,8 +68,10 @@ async function createStockAdjustment(req: Request, res: Response): Promise<void>
 
     const {
       product_id,
-      adjustment_type, // 'increase' or 'decrease'
+      adjustment_type,
       quantity,
+      cost_price,
+      selling_price,
       reason,
       notes
     } = req.body;
@@ -95,7 +98,7 @@ async function createStockAdjustment(req: Request, res: Response): Promise<void>
     // Get current product stock
     const { data: product, error: productError } = await supabase
       .from('products')
-      .select('stock_quantity, name, store_id')
+      .select('stock_quantity, name, store_id, cost_price, default_price')
       .eq('id', product_id)
       .in('store_id', storeIds)
       .single();
@@ -160,6 +163,50 @@ async function createStockAdjustment(req: Request, res: Response): Promise<void>
 
     if (updateError) {
       throw updateError;
+    }
+
+    // FIFO batch handling for stock increases
+    const parsedCost = cost_price != null && cost_price !== '' ? parseFloat(cost_price) : null;
+    const existingCost = product.cost_price != null ? parseFloat(String(product.cost_price)) : null;
+
+    if (adjustment_type === 'increase') {
+      const isNewPrice = parsedCost != null && !isNaN(parsedCost) && parsedCost !== existingCost;
+
+      if (isNewPrice) {
+        // New price → create a new batch
+        const newSell = selling_price != null && selling_price !== '' ? parseFloat(selling_price) : null;
+        await createBatch(supabase, {
+          product_id,
+          store_id: product.store_id,
+          cost_price: parsedCost as number,
+          selling_price: newSell ?? product.default_price ?? undefined,
+          qty: adjustmentQty,
+          note: notes || reason || 'Stock adjustment',
+          created_by: userId
+        });
+        await supabase.from('products').update({ cost_price: parsedCost }).eq('id', product_id);
+      } else {
+        // No new price → add qty to the latest existing batch (keep FIFO tracking accurate)
+        const { data: latestBatch } = await supabase
+          .from('product_batches')
+          .select('id, qty_received, qty_remaining')
+          .eq('product_id', product_id)
+          .eq('store_id', product.store_id)
+          .order('received_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (latestBatch) {
+          await supabase
+            .from('product_batches')
+            .update({
+              qty_received: latestBatch.qty_received + adjustmentQty,
+              qty_remaining: latestBatch.qty_remaining + adjustmentQty
+            })
+            .eq('id', latestBatch.id);
+        }
+        // If no batches exist: leave as legacy (untracked)
+      }
     }
 
     console.log('✅ Stock adjustment completed:', {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { depleteBatchesFIFO } from '../../services/fifoService';
 
 // Create sale transaction
 async function createSale(req: Request, res: Response): Promise<void> {
@@ -71,17 +72,26 @@ async function createSale(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Sale created:', sale.id);
-    console.log('📦 Inserting sale items...');
+    console.log('📦 Computing FIFO costs and inserting sale items...');
 
-    // Insert sales items
-    const salesItems = (items as Array<{
-      product_id: string;
-      quantity: number;
-      price: number;
-      discount_amount?: number;
-      discount_percent?: number;
-      barcode?: string;
-    }>).map((item: any) => ({
+    // Compute FIFO weighted average cost per item (also depletes batch qty_remaining)
+    type SaleItem = { product_id: string; quantity: number; price: number; discount_amount?: number; discount_percent?: number; barcode?: string };
+    const typedItems = items as SaleItem[];
+
+    const costMap = new Map<string, number>();
+    await Promise.all(
+      typedItems.map(async (item) => {
+        const cost = await depleteBatchesFIFO(supabase, {
+          product_id: item.product_id,
+          store_id,
+          qty_sold: item.quantity
+        });
+        costMap.set(item.product_id, cost);
+      })
+    );
+
+    // Insert sales items with FIFO cost_price
+    const salesItems = typedItems.map((item) => ({
       sales_id: sale.id,
       product_id: item.product_id,
       quantity: item.quantity,
@@ -89,7 +99,8 @@ async function createSale(req: Request, res: Response): Promise<void> {
       discount_amount: item.discount_amount || 0,
       discount_percent: item.discount_percent || 0,
       total_price: (item.price * item.quantity) - (item.discount_amount || 0),
-      barcode: item.barcode || null
+      barcode: item.barcode || null,
+      cost_price: costMap.get(item.product_id) || 0
     }));
 
     const { error: itemsError } = await supabase

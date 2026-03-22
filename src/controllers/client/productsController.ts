@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { createBatch, getBatchHistory } from '../../services/fifoService';
 
 async function getProducts(req: Request, res: Response): Promise<void> {
   try {
@@ -283,6 +284,18 @@ async function createProduct(req: Request, res: Response): Promise<void> {
 
     if (error) throw error;
 
+    // Create initial FIFO batch if product has stock and a cost price
+    if (!is_composite && productStock != null && productStock > 0 && cost_price) {
+      await createBatch(supabase, {
+        product_id: product.id,
+        store_id,
+        cost_price: parseFloat(cost_price),
+        qty: productStock as number,
+        note: 'Initial stock',
+        created_by: userId
+      });
+    }
+
     console.log('✅ Product created successfully:', product.id);
 
     res.status(201).json({
@@ -394,6 +407,32 @@ async function updateProduct(req: Request, res: Response): Promise<void> {
     if (error) {
       console.error('Supabase update error:', error);
       throw error;
+    }
+
+    // FIFO batch logic: if cost_price was changed, create a batch for untracked units
+    if (updateData.cost_price !== undefined && updateData.cost_price !== null) {
+      const newCost = parseFloat(String(updateData.cost_price));
+      if (!isNaN(newCost) && newCost > 0) {
+        const { data: batches } = await supabase
+          .from('product_batches')
+          .select('qty_remaining')
+          .eq('product_id', id);
+
+        const trackedQty = (batches || []).reduce((sum: number, b: { qty_remaining: number }) => sum + (b.qty_remaining || 0), 0);
+        const untracked = (product.stock_quantity || 0) - trackedQty;
+
+        if (untracked > 0) {
+          await createBatch(supabase, {
+            product_id: id as string,
+            store_id: product.store_id,
+            cost_price: newCost,
+            qty: untracked,
+            note: 'Price updated via Edit Product',
+            created_by: undefined
+          });
+          console.log('✅ FIFO batch created for untracked units:', untracked, 'at cost:', newCost);
+        }
+      }
     }
 
     console.log('✅ Product updated:', product.name);
@@ -518,8 +557,9 @@ async function getCategories(req: Request, res: Response): Promise<void> {
 async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
   try {
     const companyId = req.user!.company_id;
+    const userId = req.user!.id;
     const { adjustments } = req.body as {
-      adjustments: { product_id: string; new_stock: number; reason?: string }[]
+      adjustments: { product_id: string; new_stock: number; cost_price?: number; selling_price?: number; reason?: string }[]
     };
     const supabase = getDb();
 
@@ -535,25 +575,70 @@ async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
 
     const { data: ownedProducts } = await supabase
       .from('products')
-      .select('id, stock_quantity, name')
+      .select('id, stock_quantity, store_id, cost_price, name')
       .in('id', productIds)
       .in('store_id', storeIds);
 
-    const ownedIds = new Set(ownedProducts?.map((p: { id: string }) => p.id) || []);
-    const validAdjustments = adjustments.filter(a => ownedIds.has(a.product_id));
+    type OwnedProduct = { id: string; stock_quantity: number; store_id: string; cost_price: number | null; name: string };
+    const ownedMap = new Map<string, OwnedProduct>(
+      (ownedProducts as OwnedProduct[] || []).map(p => [p.id, p])
+    );
+    const validAdjustments = adjustments.filter(a => ownedMap.has(a.product_id));
 
     if (validAdjustments.length === 0) {
       res.status(403).json({ error: 'No valid products to adjust' });
       return;
     }
 
-    // Update each product stock
+    // Update each product stock and create FIFO batches for increases
     const updates = await Promise.all(
       validAdjustments.map(async (adj) => {
+        const existing = ownedMap.get(adj.product_id);
         const { error } = await supabase
           .from('products')
           .update({ stock_quantity: adj.new_stock, updated_at: new Date().toISOString() })
           .eq('id', adj.product_id);
+
+        // FIFO batch handling for stock increases
+        if (!error && existing && adj.new_stock > (existing.stock_quantity || 0)) {
+          const diff = adj.new_stock - (existing.stock_quantity || 0);
+          const existingCost = existing.cost_price != null ? parseFloat(String(existing.cost_price)) : null;
+          const isNewPrice = adj.cost_price != null && adj.cost_price !== existingCost;
+
+          if (isNewPrice) {
+            // New price → create a new batch
+            await createBatch(supabase, {
+              product_id: adj.product_id,
+              store_id: existing.store_id,
+              cost_price: adj.cost_price as number,
+              selling_price: adj.selling_price ?? undefined,
+              qty: diff,
+              note: 'Bulk stock adjustment',
+              created_by: userId
+            });
+          } else {
+            // No new price → add qty to latest batch
+            const { data: latestBatch } = await supabase
+              .from('product_batches')
+              .select('id, qty_received, qty_remaining')
+              .eq('product_id', adj.product_id)
+              .eq('store_id', existing.store_id)
+              .order('received_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            if (latestBatch) {
+              await supabase
+                .from('product_batches')
+                .update({
+                  qty_received: latestBatch.qty_received + diff,
+                  qty_remaining: latestBatch.qty_remaining + diff
+                })
+                .eq('id', latestBatch.id);
+            }
+          }
+        }
+
         return { product_id: adj.product_id, success: !error, error };
       })
     );
@@ -574,6 +659,110 @@ async function bulkAdjustStock(req: Request, res: Response): Promise<void> {
   }
 }
 
+async function getProductBatches(req: Request, res: Response): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const companyId = req.user!.company_id;
+    const supabase = getDb();
+
+    const { data: stores } = await supabase.from('stores').select('id').eq('company_id', companyId);
+    const storeIds = stores?.map((s: { id: string }) => s.id) || [];
+
+    const { data: product } = await supabase
+      .from('products')
+      .select('id, store_id')
+      .eq('id', id)
+      .in('store_id', storeIds)
+      .single();
+
+    if (!product) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+
+    const batches = await getBatchHistory(supabase, id, product.store_id);
+    res.json({ batches });
+  } catch (error) {
+    console.error('❌ Get batches error:', error);
+    res.status(500).json({ error: 'Failed to fetch batch history' });
+  }
+}
+
+async function restockProduct(req: Request, res: Response): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const companyId = req.user!.company_id;
+    const userId = req.user!.id;
+    const { qty, cost_price, selling_price, note } = req.body as { qty: number; cost_price: number; selling_price?: number; note?: string };
+    const supabase = getDb();
+
+    if (!qty || qty <= 0) {
+      res.status(400).json({ error: 'Quantity must be greater than 0' });
+      return;
+    }
+    if (cost_price == null || cost_price < 0) {
+      res.status(400).json({ error: 'Cost price is required' });
+      return;
+    }
+
+    // Verify product belongs to this company
+    const { data: stores } = await supabase.from('stores').select('id').eq('company_id', companyId);
+    const storeIds = stores?.map((s: { id: string }) => s.id) || [];
+
+    const { data: product } = await supabase
+      .from('products')
+      .select('id, stock_quantity, store_id, name')
+      .eq('id', id)
+      .in('store_id', storeIds)
+      .eq('is_active', true)
+      .single();
+
+    if (!product) {
+      res.status(404).json({ error: 'Product not found', code: 'PRODUCT_NOT_FOUND' });
+      return;
+    }
+
+    const newStock = (product.stock_quantity || 0) + qty;
+
+    // Update stock_quantity and cost_price on the product
+    const updatePayload: Record<string, unknown> = { stock_quantity: newStock, cost_price, updated_at: new Date().toISOString() };
+    if (selling_price != null) updatePayload.default_price = selling_price;
+
+    const { data: updated, error: updateError } = await supabase
+      .from('products')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // Create FIFO batch for this restock
+    await createBatch(supabase, {
+      product_id: id,
+      store_id: product.store_id,
+      cost_price,
+      selling_price: selling_price ?? undefined,
+      qty,
+      note: note || 'Restock',
+      created_by: userId
+    });
+
+    console.log(`✅ Restocked ${product.name}: +${qty} units @ ₱${cost_price} (total: ${newStock})`);
+
+    res.json({
+      message: 'Product restocked successfully',
+      product: updated,
+      batch: { qty_added: qty, cost_price, new_total_stock: newStock }
+    });
+
+  } catch (error) {
+    const err = error as Error;
+    console.error('❌ Restock error:', err);
+    res.status(500).json({ error: 'Failed to restock product', code: 'RESTOCK_ERROR' });
+  }
+}
+
 export {
   getProducts,
   getProduct,
@@ -581,5 +770,7 @@ export {
   updateProduct,
   deleteProduct,
   getCategories,
-  bulkAdjustStock
+  bulkAdjustStock,
+  restockProduct,
+  getProductBatches
 };
