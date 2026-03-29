@@ -231,7 +231,7 @@ async function createProduct(req: Request, res: Response): Promise<void> {
     if (!finalSku) {
       const timestamp = Date.now().toString().slice(-6);
       const namePrefix = name.substring(0, 3).toUpperCase();
-      finalSku = `${namePrefix}${timestamp}`;
+      finalSku = `TP-${namePrefix}${timestamp}`;
     }
 
     // Check if SKU already exists
