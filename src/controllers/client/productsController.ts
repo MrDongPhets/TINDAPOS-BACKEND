@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { createBatch, getBatchHistory } from '../../services/fifoService';
+import { cacheGet, cacheSet, cacheDel } from '../../config/redis';
 
 async function getProducts(req: Request, res: Response): Promise<void> {
   try {
@@ -9,6 +10,15 @@ async function getProducts(req: Request, res: Response): Promise<void> {
     const supabase = getDb();
 
     console.log('📦 Getting products for company:', companyId);
+
+    // Check cache first
+    const cacheKey = `products:${companyId}:${store_id || 'all'}:${category_id || 'all'}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      console.log('⚡ Products from cache');
+      res.json(JSON.parse(cached));
+      return;
+    }
 
     // Get store IDs for this company
     const { data: stores } = await supabase
@@ -81,11 +91,16 @@ async function getProducts(req: Request, res: Response): Promise<void> {
 
     console.log('✅ Products found:', productsWithExpiry.length);
 
-    res.json({
+    const response = {
       products: productsWithExpiry,
       count: count || 0,
       timestamp: new Date().toISOString()
-    });
+    };
+
+    // Cache for 5 minutes
+    await cacheSet(cacheKey, JSON.stringify(response), 300);
+
+    res.json(response);
 
   } catch (error) {
     console.error('Get products error:', error);
@@ -300,6 +315,7 @@ async function createProduct(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Product created successfully:', product.id);
+    await cacheDel(`products:${companyId}:*`);
 
     res.status(201).json({
       message: 'Product created successfully',
@@ -439,6 +455,7 @@ async function updateProduct(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Product updated:', product.name);
+    await cacheDel(`products:${companyId}:*`);
 
     res.json({
       message: 'Product updated successfully',
@@ -493,6 +510,7 @@ async function deleteProduct(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Product deleted (soft):', product.name);
+    await cacheDel(`products:${companyId}:*`);
 
     res.json({
       message: 'Product deleted successfully',

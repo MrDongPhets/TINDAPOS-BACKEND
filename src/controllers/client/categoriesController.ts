@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { cacheGet, cacheSet, cacheDel } from '../../config/redis';
 
 async function getCategories(req: Request, res: Response): Promise<void> {
   try {
@@ -7,6 +8,15 @@ async function getCategories(req: Request, res: Response): Promise<void> {
     const supabase = getDb();
 
     console.log('📁 Getting categories for company:', companyId);
+
+    // Check cache first
+    const cacheKey = `categories:${companyId}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      console.log('⚡ Categories from cache');
+      res.json(JSON.parse(cached));
+      return;
+    }
 
     // Get store IDs for this company
     const { data: stores } = await supabase
@@ -43,11 +53,16 @@ async function getCategories(req: Request, res: Response): Promise<void> {
 
     console.log('✅ Categories found:', transformedCategories.length);
 
-    res.json({
+    const response = {
       categories: transformedCategories,
       count: count || 0,
       timestamp: new Date().toISOString()
-    });
+    };
+
+    // Cache for 5 minutes
+    await cacheSet(cacheKey, JSON.stringify(response), 300);
+
+    res.json(response);
 
   } catch (error) {
     console.error('Get categories error:', error);
@@ -207,6 +222,7 @@ async function createCategory(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Category created:', category.name);
+    await cacheDel(`categories:${companyId}`);
 
     res.status(201).json({
       message: 'Category created successfully',
@@ -311,6 +327,7 @@ async function updateCategory(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Category updated:', category.name);
+    await cacheDel(`categories:${companyId}`);
 
     res.json({
       message: 'Category updated successfully',
@@ -397,6 +414,7 @@ async function deleteCategory(req: Request, res: Response): Promise<void> {
     }
 
     console.log('✅ Category deleted (soft):', category.name);
+    await cacheDel(`categories:${companyId}`);
 
     res.json({
       message: 'Category deleted successfully',

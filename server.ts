@@ -5,6 +5,7 @@ import path from 'path';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './src/config/swagger';
 import { initializeDatabase } from './src/config/database';
+import { connectRedis } from './src/config/redis';
 import { configureCORS } from './src/config/cors';
 import { requestLogger } from './src/middleware/logger';
 import { errorHandler } from './src/middleware/errorHandler';
@@ -191,6 +192,9 @@ async function startServer(): Promise<void> {
   console.log('╚════════════════════════════════════════════════════╝');
   console.log(`🔍 Environment:  ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Port:         ${PORT}`);
+
+  // Initialize Redis Cache
+  await connectRedis();
 
   // Initialize Database
   const dbInitialized = await initializeDatabase();
