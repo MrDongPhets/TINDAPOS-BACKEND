@@ -10,7 +10,7 @@ import { authenticateToken } from '../../middleware/auth';
 import { verifyToken, getMe, cleanup } from '../../controllers/auth/verifyController';
 import { googleRedirect, googleCallback } from '../../controllers/auth/googleController';
 import { forgotPassword, resetPassword } from '../../controllers/auth/forgotPasswordController';
-import { registrationLimiter, authLimiter } from '../../middleware/rateLimiter';
+import { registrationLimiter, authLimiter, loginLimiter } from '../../middleware/rateLimiter';
 
 const router = express.Router();
 
@@ -71,7 +71,7 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.post('/login', clientLogin);
+router.post('/login', loginLimiter, clientLogin);
 
 /**
  * @swagger
@@ -129,7 +129,7 @@ router.post('/login', clientLogin);
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/super-admin/login', superAdminLogin);
+router.post('/super-admin/login', loginLimiter, superAdminLogin);
 
 /**
  * @swagger

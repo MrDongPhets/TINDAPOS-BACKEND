@@ -9,6 +9,7 @@ import { connectRedis } from './src/config/redis';
 import { configureCORS } from './src/config/cors';
 import { requestLogger } from './src/middleware/logger';
 import { errorHandler } from './src/middleware/errorHandler';
+import { globalLimiter } from './src/middleware/rateLimiter';
 import routes from './src/routes/index';
 import { ensureDemoData } from './src/services/demoDataService';
 import uploadRoutes from './src/routes/client/upload';
@@ -19,6 +20,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Middleware
 app.use(configureCORS());
+app.use(globalLimiter);
 
 // Capture raw body for PayMongo webhook signature verification
 app.use((req: Request, res: Response, next) => {
