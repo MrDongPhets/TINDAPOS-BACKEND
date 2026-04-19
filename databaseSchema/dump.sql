@@ -434,3 +434,29 @@ CREATE TABLE public.users (
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES public.companies(id)
 );
+CREATE TABLE public.stock_counts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  store_id character varying REFERENCES public.stores(id) ON DELETE CASCADE,
+  company_id uuid REFERENCES public.companies(id) ON DELETE CASCADE,
+  created_by uuid REFERENCES public.users(id),
+  status character varying(20) NOT NULL DEFAULT 'draft' CHECK (status::text = ANY (ARRAY['draft'::text, 'submitted'::text, 'approved'::text])),
+  notes text,
+  submitted_at timestamp with time zone,
+  approved_by uuid REFERENCES public.users(id),
+  approved_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT stock_counts_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.stock_count_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  stock_count_id uuid REFERENCES public.stock_counts(id) ON DELETE CASCADE,
+  product_id uuid REFERENCES public.products(id) ON DELETE CASCADE,
+  expected_qty numeric DEFAULT 0,
+  actual_qty numeric,
+  variance numeric,
+  notes text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT stock_count_items_pkey PRIMARY KEY (id)
+);

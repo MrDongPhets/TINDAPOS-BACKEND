@@ -5,6 +5,7 @@ import { getCategories } from '../../controllers/client/categoriesController';
 
 import productsRoutes from './products';
 import salesRoutes from './sales';
+import stockCountRoutes from './stockCount';
 
 const router = express.Router();
 
@@ -20,5 +21,6 @@ router.get('/categories', getCategories);
 // Mount POS routes
 router.use('/products', productsRoutes);
 router.use('/sales', salesRoutes);
+router.use('/stock-counts', stockCountRoutes);
 
 export default router;
