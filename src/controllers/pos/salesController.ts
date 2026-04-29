@@ -71,8 +71,16 @@ async function createSale(req: Request, res: Response): Promise<void> {
       else vatableAmount += itemTotal;
     }
 
+    // SC/PWD discount: entire sale is VAT-exempt (RA 9994 / RA 7277)
+    const isScPwd = discount_type === 'senior_citizen' || discount_type === 'pwd'
+    if (isScPwd) {
+      vatExemptAmount = parseFloat(String(total_amount))
+      vatableAmount = 0
+      zeroRatedAmount = 0
+    }
+
     // VAT = vatable * 12/112 (VAT-inclusive computation)
-    const vatAmount = parseFloat((vatableAmount * 12 / 112).toFixed(2));
+    const vatAmount = isScPwd ? 0 : parseFloat((vatableAmount * 12 / 112).toFixed(2));
 
     console.log('📝 Creating sale record...');
 
