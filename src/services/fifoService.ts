@@ -66,6 +66,7 @@ export async function depleteBatchesFIFO(
 
   let qtyLeft = params.qty_sold;
   let totalCost = 0;
+  const batchUpdates: { id: string; newRemaining: number }[] = [];
 
   for (const batch of batches) {
     if (qtyLeft <= 0) break;
@@ -73,13 +74,7 @@ export async function depleteBatchesFIFO(
     const take = Math.min(qtyLeft, batch.qty_remaining);
     totalCost += take * batch.cost_price;
     qtyLeft -= take;
-
-    const newRemaining = batch.qty_remaining - take;
-
-    await supabase
-      .from('product_batches')
-      .update({ qty_remaining: newRemaining })
-      .eq('id', batch.id);
+    batchUpdates.push({ id: batch.id, newRemaining: batch.qty_remaining - take });
   }
 
   // If still qty left (more sold than batched — edge case), use last known cost
@@ -87,6 +82,13 @@ export async function depleteBatchesFIFO(
     const lastBatch = batches[batches.length - 1];
     totalCost += qtyLeft * (lastBatch?.cost_price || 0);
   }
+
+  // Run all batch updates in parallel
+  await Promise.all(
+    batchUpdates.map(({ id, newRemaining }) =>
+      supabase.from('product_batches').update({ qty_remaining: newRemaining }).eq('id', id)
+    )
+  );
 
   const weightedAvgCost = totalCost / params.qty_sold;
   console.log(`🔍 FIFO cost for ${params.qty_sold} units of product ${params.product_id}: ₱${weightedAvgCost.toFixed(2)}`);

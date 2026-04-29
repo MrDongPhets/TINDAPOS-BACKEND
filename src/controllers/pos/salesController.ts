@@ -40,25 +40,21 @@ async function createSale(req: Request, res: Response): Promise<void> {
     }
 
     // Generate receipt number (internal reference)
-    const receipt_number = `RCP-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    const receipt_number = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
 
-    // Generate OR number (sequential, BIR-compliant)
-    const { data: storeData } = await supabase
-      .from('stores')
-      .select('or_counter, or_prefix, grand_total_accumulator')
-      .eq('id', store_id)
-      .single();
+    // Fetch store data and product VAT types in parallel (independent queries)
+    const productIds = (items as Array<{ product_id: string }>).map(i => i.product_id);
+    const [storeResult, productVatResult] = await Promise.all([
+      supabase.from('stores').select('or_counter, or_prefix, grand_total_accumulator').eq('id', store_id).single(),
+      supabase.from('products').select('id, vat_type').in('id', productIds)
+    ]);
+
+    const storeData = storeResult.data;
+    const productVatData = productVatResult.data;
 
     const newCounter = (storeData?.or_counter || 0) + 1;
     const orPrefix = storeData?.or_prefix || 'OR';
     const or_number = `${orPrefix}-${String(newCounter).padStart(8, '0')}`;
-
-    // Fetch vat_type per product for VAT computation
-    const productIds = (items as Array<{ product_id: string }>).map(i => i.product_id);
-    const { data: productVatData } = await supabase
-      .from('products')
-      .select('id, vat_type')
-      .in('id', productIds);
 
     const vatTypeMap = new Map((productVatData || []).map((p: { id: string; vat_type: string }) => [p.id, p.vat_type || 'vatable']));
 
@@ -156,40 +152,34 @@ async function createSale(req: Request, res: Response): Promise<void> {
     console.log('✅ Sales items inserted');
     console.log('📊 Updating inventory...');
 
-    // Update inventory for each item
-    for (const item of items as Array<{ product_id: string; quantity: number }>) {
-      // Get current stock
-      const { data: product, error: productError } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', item.product_id)
-        .single();
+    // Fetch all current stock levels in one query
+    const { data: productStocks, error: stockFetchError } = await supabase
+      .from('products')
+      .select('id, stock_quantity')
+      .in('id', productIds);
 
-      if (productError) {
-        console.error('❌ Product fetch error:', productError);
-        throw productError;
-      }
+    if (stockFetchError) throw stockFetchError;
 
-      const previous_stock = product.stock_quantity;
-      const new_stock = previous_stock - item.quantity;
+    const stockMap = new Map<string, number>(
+      (productStocks || []).map((p: { id: string; stock_quantity: number }) => [p.id, p.stock_quantity] as [string, number])
+    );
 
-      console.log(`📦 Updating product ${item.product_id}: ${previous_stock} -> ${new_stock}`);
+    // Update all product stocks in parallel + collect movement records
+    const movementRecords: object[] = [];
 
-      // Update product stock
-      const { error: updateError } = await supabase
-        .from('products')
-        .update({ stock_quantity: new_stock })
-        .eq('id', item.product_id);
+    await Promise.all(
+      (items as Array<{ product_id: string; quantity: number }>).map(async (item) => {
+        const previous_stock = stockMap.get(item.product_id) ?? 0;
+        const new_stock = previous_stock - item.quantity;
 
-      if (updateError) {
-        console.error('❌ Product update error:', updateError);
-        throw updateError;
-      }
+        const { error: updateError } = await supabase
+          .from('products')
+          .update({ stock_quantity: new_stock })
+          .eq('id', item.product_id);
 
-      // Record inventory movement
-      const { error: movementError } = await supabase
-        .from('inventory_movements')
-        .insert({
+        if (updateError) throw updateError;
+
+        movementRecords.push({
           product_id: item.product_id,
           store_id,
           movement_type: 'out',
@@ -201,11 +191,16 @@ async function createSale(req: Request, res: Response): Promise<void> {
           notes: `Sale ${receipt_number}`,
           created_by: isStaff ? null : userId
         });
+      })
+    );
 
-      if (movementError) {
-        console.error('❌ Inventory movement error:', movementError);
-        // Don't throw here, inventory movement is not critical
-      }
+    // Bulk insert all inventory movements in one call
+    const { error: movementError } = await supabase
+      .from('inventory_movements')
+      .insert(movementRecords);
+
+    if (movementError) {
+      console.error('❌ Inventory movement error (non-critical):', movementError);
     }
 
     // If payment method is credit, record a charge in credit_ledger
