@@ -16,6 +16,7 @@ import recipesRoutes from './recipes';
 import manufacturingRoutes from './manufacturing';
 import utangRoutes from './utang';
 import stockCountRoutes from './stockCount';
+import bundleRoutes from './bundles';
 
 const router = express.Router();
 
@@ -139,5 +140,6 @@ router.use('/recipes', recipesRoutes);
 router.use('/manufacturing', manufacturingRoutes);
 router.use('/utang', utangRoutes);
 router.use('/stock-counts', stockCountRoutes);
+router.use('/bundles', bundleRoutes);
 
 export default router;

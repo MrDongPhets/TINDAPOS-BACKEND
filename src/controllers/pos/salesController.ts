@@ -160,11 +160,45 @@ async function createSale(req: Request, res: Response): Promise<void> {
     console.log('✅ Sales items inserted');
     console.log('📊 Updating inventory...');
 
+    // Expand bundle items into their components for stock deduction
+    const { data: productTypes } = await supabase
+      .from('products')
+      .select('id, product_type')
+      .in('id', productIds);
+
+    const bundleIds = (productTypes || [])
+      .filter((p: { id: string; product_type: string }) => p.product_type === 'bundle')
+      .map((p: { id: string }) => p.id);
+
+    // Build effective inventory items: simple products keep as-is, bundles expand to components
+    type InventoryItem = { product_id: string; quantity: number };
+    const inventoryItems: InventoryItem[] = (items as InventoryItem[]).filter(i => !bundleIds.includes(i.product_id));
+
+    if (bundleIds.length > 0) {
+      const { data: bundleItemsData } = await supabase
+        .from('bundle_items')
+        .select('bundle_id, product_id, quantity')
+        .in('bundle_id', bundleIds);
+
+      for (const bundleId of bundleIds) {
+        const soldQty = (items as InventoryItem[]).find(i => i.product_id === bundleId)?.quantity ?? 0;
+        const components = (bundleItemsData || []).filter((bi: any) => bi.bundle_id === bundleId);
+        for (const comp of components as Array<{ product_id: string; quantity: number }>) {
+          const needed = comp.quantity * soldQty;
+          const existing = inventoryItems.find(i => i.product_id === comp.product_id);
+          if (existing) existing.quantity += needed;
+          else inventoryItems.push({ product_id: comp.product_id, quantity: needed });
+        }
+      }
+    }
+
+    const inventoryProductIds = inventoryItems.map(i => i.product_id);
+
     // Fetch all current stock levels in one query
     const { data: productStocks, error: stockFetchError } = await supabase
       .from('products')
       .select('id, stock_quantity')
-      .in('id', productIds);
+      .in('id', inventoryProductIds);
 
     if (stockFetchError) throw stockFetchError;
 
@@ -176,7 +210,7 @@ async function createSale(req: Request, res: Response): Promise<void> {
     const movementRecords: object[] = [];
 
     await Promise.all(
-      (items as Array<{ product_id: string; quantity: number }>).map(async (item) => {
+      inventoryItems.map(async (item) => {
         const previous_stock = stockMap.get(item.product_id) ?? 0;
         const new_stock = previous_stock - item.quantity;
 

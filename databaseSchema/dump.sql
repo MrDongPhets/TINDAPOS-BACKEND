@@ -221,6 +221,7 @@ CREATE TABLE public.products (
   is_composite boolean DEFAULT false,
   recipe_cost numeric DEFAULT 0.00,
   expiry_date timestamp with time zone,
+  product_type character varying DEFAULT 'simple'::character varying CHECK (product_type::text = ANY (ARRAY['simple'::text, 'bundle'::text])),
   CONSTRAINT products_pkey PRIMARY KEY (id),
   CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES public.categories(id),
   CONSTRAINT fk_products_store FOREIGN KEY (store_id) REFERENCES public.stores(id),
@@ -447,6 +448,19 @@ CREATE TABLE public.stock_counts (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT stock_counts_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.bundle_items (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  bundle_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  quantity integer NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  company_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT bundle_items_pkey PRIMARY KEY (id),
+  CONSTRAINT unique_bundle_product UNIQUE (bundle_id, product_id),
+  CONSTRAINT bundle_items_bundle_id_fkey FOREIGN KEY (bundle_id) REFERENCES public.products(id) ON DELETE CASCADE,
+  CONSTRAINT bundle_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT bundle_items_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id)
 );
 CREATE TABLE public.stock_count_items (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

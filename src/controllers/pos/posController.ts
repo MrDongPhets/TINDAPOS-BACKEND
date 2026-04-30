@@ -36,23 +36,47 @@ async function getProductsByCategory(req: Request, res: Response): Promise<void>
 
     let query = supabase
       .from('products')
-      .select(`
-        *,
-        categories(id, name, color, icon)
-      `)
+      .select('*, categories(id, name, color, icon)')
       .eq('store_id', store_id)
-      .eq('is_active', true)
-      .gt('stock_quantity', 0);
+      .eq('is_active', true);
 
     if (category_id && category_id !== 'all') {
       query = query.eq('category_id', category_id);
     }
 
-    const { data: products, error } = await query.order('name');
-
+    const { data: allProducts, error } = await query.order('name');
     if (error) throw error;
 
-    res.json({ products: products || [] });
+    const all = allProducts || [];
+    const simpleProducts = all.filter((p: any) => p.product_type !== 'bundle' && p.stock_quantity > 0);
+    const bundleProducts = all.filter((p: any) => p.product_type === 'bundle');
+
+    if (bundleProducts.length === 0) {
+      res.json({ products: simpleProducts });
+      return;
+    }
+
+    // Compute effective bundle stock from components
+    const bundleIds = bundleProducts.map((b: any) => b.id);
+    const { data: bundleItems } = await supabase
+      .from('bundle_items')
+      .select('bundle_id, quantity, component:product_id(stock_quantity)')
+      .in('bundle_id', bundleIds);
+
+    const effectiveStockMap = new Map<string, number>();
+    for (const bundle of bundleProducts) {
+      const items = (bundleItems || []).filter((bi: any) => bi.bundle_id === bundle.id);
+      const stock = items.length === 0 ? 0 : Math.min(
+        ...items.map((i: any) => Math.floor(((i.component as any)?.stock_quantity ?? 0) / i.quantity))
+      );
+      effectiveStockMap.set(bundle.id, stock);
+    }
+
+    const bundlesWithStock = bundleProducts
+      .map((b: any) => ({ ...b, stock_quantity: effectiveStockMap.get(b.id) ?? 0 }))
+      .filter((b: any) => b.stock_quantity > 0);
+
+    res.json({ products: [...simpleProducts, ...bundlesWithStock] });
   } catch (error) {
     console.error('Get products by category error:', error);
     res.status(500).json({ error: 'Failed to fetch products' });
