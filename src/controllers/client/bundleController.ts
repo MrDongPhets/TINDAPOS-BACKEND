@@ -112,6 +112,12 @@ async function updateBundle(req: Request, res: Response): Promise<void> {
     const { name, description, default_price, category_id, image_url, items } = req.body;
     const supabase = getDb();
 
+    // Verify ownership through stores (products have no company_id)
+    const { data: stores } = await supabase
+      .from('stores').select('id').eq('company_id', companyId);
+    const storeIds = (stores || []).map((s: { id: string }) => s.id);
+    if (storeIds.length === 0) { res.status(403).json({ error: 'Not authorized' }); return; }
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (name !== undefined) updateData.name = name;
     if (description !== undefined) updateData.description = description;
@@ -123,7 +129,7 @@ async function updateBundle(req: Request, res: Response): Promise<void> {
       .from('products')
       .update(updateData)
       .eq('id', id)
-      .eq('company_id', companyId)
+      .in('store_id', storeIds)
       .eq('product_type', 'bundle');
 
     if (updateError) throw updateError;
@@ -154,11 +160,17 @@ async function deleteBundle(req: Request, res: Response): Promise<void> {
     const companyId = req.user!.company_id;
     const supabase = getDb();
 
+    // Verify ownership through stores (products have no company_id)
+    const { data: stores } = await supabase
+      .from('stores').select('id').eq('company_id', companyId);
+    const storeIds = (stores || []).map((s: { id: string }) => s.id);
+    if (storeIds.length === 0) { res.status(403).json({ error: 'Not authorized' }); return; }
+
     const { error } = await supabase
       .from('products')
       .update({ is_active: false })
       .eq('id', id)
-      .eq('company_id', companyId)
+      .in('store_id', storeIds)
       .eq('product_type', 'bundle');
 
     if (error) throw error;

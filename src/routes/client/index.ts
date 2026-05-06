@@ -58,7 +58,7 @@ router.get('/settings', async (req: Request, res: Response) => {
     const db = getDb();
     const { data: user, error: userErr } = await db
       .from('users')
-      .select('id, name, email')
+      .select('id, name, email, avatar_url')
       .eq('id', req.user!.id)
       .single();
     if (userErr) throw userErr;
@@ -80,11 +80,12 @@ router.get('/settings', async (req: Request, res: Response) => {
 router.put('/settings/account', async (req: Request, res: Response) => {
   try {
     const db = getDb();
-    const { name, email, current_password, new_password } = req.body;
+    const { name, email, current_password, new_password, avatar_url } = req.body;
     const updateData: any = {};
 
     if (name) updateData.name = name;
     if (email) updateData.email = email;
+    if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
 
     if (new_password) {
       if (!current_password) {

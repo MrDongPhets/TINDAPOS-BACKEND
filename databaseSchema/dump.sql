@@ -432,6 +432,7 @@ CREATE TABLE public.users (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   company_id uuid,
+  avatar_url text,
   CONSTRAINT users_pkey PRIMARY KEY (id),
   CONSTRAINT fk_users_company FOREIGN KEY (company_id) REFERENCES public.companies(id)
 );
