@@ -8,7 +8,7 @@ import {
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { getDb } from '../../config/database';
 
-const RP_NAME = 'TindaPOS';
+const RP_NAME = 'Tindapo POS';
 
 // In-memory challenge store (TTL: 5 min)
 const challengeStore = new Map<string, { challenge: string; expires: number }>();
