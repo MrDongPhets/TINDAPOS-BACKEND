@@ -313,6 +313,34 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Staff Attendance
+    CREATE TABLE IF NOT EXISTS staff_attendance (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      staff_id TEXT NOT NULL,
+      company_id TEXT NOT NULL,
+      store_id TEXT NOT NULL,
+      clock_in TEXT NOT NULL DEFAULT (datetime('now')),
+      clock_out TEXT,
+      total_minutes INTEGER,
+      notes TEXT,
+      verified_with_biometric INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Staff WebAuthn Credentials
+    CREATE TABLE IF NOT EXISTS staff_webauthn_credentials (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      staff_id TEXT NOT NULL,
+      company_id TEXT NOT NULL,
+      credential_id TEXT NOT NULL UNIQUE,
+      public_key TEXT NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      device_name TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Super Admins (kept for compatibility, unused in offline mode)
     CREATE TABLE IF NOT EXISTS super_admins (
       id TEXT PRIMARY KEY,

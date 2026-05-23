@@ -6,6 +6,9 @@ import { getCategories } from '../../controllers/client/categoriesController';
 import productsRoutes from './products';
 import salesRoutes from './sales';
 import stockCountRoutes from './stockCount';
+import utangRoutes from '../client/utang';
+import attendanceRoutes from './attendance';
+import webauthnRoutes from './webauthn';
 
 const router = express.Router();
 
@@ -22,5 +25,8 @@ router.get('/categories', getCategories);
 router.use('/products', productsRoutes);
 router.use('/sales', salesRoutes);
 router.use('/stock-counts', stockCountRoutes);
+router.use('/utang', utangRoutes);
+router.use('/attendance', attendanceRoutes);
+router.use('/webauthn', webauthnRoutes);
 
 export default router;
