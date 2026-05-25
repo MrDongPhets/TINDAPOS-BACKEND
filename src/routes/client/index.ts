@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { authenticateToken, requireClient, requireActiveSubscription } from '../../middleware/auth';
+import { authenticateToken, requireClient, requireActiveSubscription, requireAdvancedReports } from '../../middleware/auth';
 import { getDb } from '../../config/database';
 import bcrypt from 'bcryptjs';
 
@@ -71,7 +71,11 @@ router.get('/settings', async (req: Request, res: Response) => {
       .single();
     if (companyErr) throw companyErr;
 
-    res.json({ user, receipt: company?.settings?.receipt || {} });
+    res.json({
+      user,
+      receipt: company?.settings?.receipt || {},
+      biometric_enabled: company?.settings?.biometric_enabled === true,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -123,6 +127,26 @@ router.put('/settings/receipt', async (req: Request, res: Response) => {
     const { error } = await db.from('companies').update({ settings: updatedSettings }).eq('id', req.user!.company_id);
     if (error) throw error;
     res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /client/settings/biometric — toggle biometric clock-in (Laking Negosyo only)
+router.patch('/settings/biometric', requireAdvancedReports, async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const { enabled } = req.body;
+
+    const { data: company } = await db.from('companies').select('settings').eq('id', req.user!.company_id).single();
+    const currentSettings = company?.settings || {};
+    const updatedSettings = { ...currentSettings, biometric_enabled: enabled === true };
+
+    const { error } = await db.from('companies').update({ settings: updatedSettings }).eq('id', req.user!.company_id);
+    if (error) throw error;
+
+    console.log(`✅ Biometric ${enabled ? 'enabled' : 'disabled'} for company ${req.user!.company_id}`);
+    res.json({ success: true, biometric_enabled: enabled === true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

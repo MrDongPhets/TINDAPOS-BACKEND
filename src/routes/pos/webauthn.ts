@@ -7,14 +7,16 @@ import {
   getRegisteredDevices,
   removeDevice,
 } from '../../controllers/pos/webauthnController';
+import { requireBiometricEnabled } from '../../middleware/auth';
 
 const router = Router();
 
-router.get('/register/options', getRegistrationOptions);
-router.post('/register/verify', verifyRegistration);
-router.get('/auth/options', getAuthOptions);
-router.post('/auth/verify', verifyAuthentication);
-router.get('/devices', getRegisteredDevices);
-router.delete('/devices/:id', removeDevice);
+// All biometric/WebAuthn endpoints require biometric to be enabled by the company owner
+router.get('/register/options', requireBiometricEnabled, getRegistrationOptions);
+router.post('/register/verify', requireBiometricEnabled, verifyRegistration);
+router.get('/auth/options', requireBiometricEnabled, getAuthOptions);
+router.post('/auth/verify', requireBiometricEnabled, verifyAuthentication);
+router.get('/devices', requireBiometricEnabled, getRegisteredDevices);
+router.delete('/devices/:id', requireBiometricEnabled, removeDevice);
 
 export default router;

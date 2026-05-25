@@ -135,10 +135,73 @@ async function requireActiveSubscription(req: Request, res: Response, next: Next
   }
 }
 
+async function requireAdvancedReports(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const companyId = req.user?.company_id;
+    if (!companyId) {
+      res.status(401).json({ error: 'Unauthorized', code: 'NO_COMPANY' });
+      return;
+    }
+
+    const supabase = getDb();
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('plan_name, features')
+      .eq('company_id', companyId)
+      .single();
+
+    const isTrial = !sub || sub.plan_name === 'trial';
+    const hasReports = isTrial || sub.features?.reports === true;
+
+    if (!hasReports) {
+      res.status(403).json({
+        error: 'Upgrade to Laking Negosyo to access this report',
+        code: 'PLAN_RESTRICTED'
+      });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function requireBiometricEnabled(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const companyId = req.user?.company_id;
+    if (!companyId) {
+      res.status(401).json({ error: 'Unauthorized', code: 'NO_COMPANY' });
+      return;
+    }
+
+    const supabase = getDb();
+    const { data } = await supabase
+      .from('companies')
+      .select('settings')
+      .eq('id', companyId)
+      .single();
+
+    if (!data?.settings?.biometric_enabled) {
+      res.status(403).json({
+        error: 'Biometric clock-in is not enabled for your company. Ask your manager to enable it in Settings.',
+        code: 'BIOMETRIC_DISABLED'
+      });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 export {
   authenticateToken,
   requireSuperAdmin,
   requireClient,
   requireClientOrStaff,
-  requireActiveSubscription
+  requireActiveSubscription,
+  requireAdvancedReports,
+  requireBiometricEnabled
 };
