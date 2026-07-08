@@ -536,11 +536,90 @@ async function getZReadingHistory(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Get X-Reading data (current shift running total — read-only, no save)
+async function getXReading(req: Request, res: Response): Promise<void> {
+  try {
+    const { store_id } = req.query;
+    const companyId = req.user!.company_id;
+    const supabase = getDb();
+
+    if (!store_id) {
+      res.status(400).json({ error: 'store_id is required' });
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+
+    const { data: sales, error } = await supabase
+      .from('sales')
+      .select('total_amount, tax_amount, vatable_amount, vat_exempt_amount, zero_rated_amount, or_number, payment_method, created_at')
+      .eq('company_id', companyId)
+      .eq('store_id', store_id)
+      .gte('created_at', today.toISOString())
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const { data: store } = await supabase
+      .from('stores')
+      .select('grand_total_accumulator, or_counter, or_prefix, name, address, phone')
+      .eq('id', store_id)
+      .single();
+
+    const { data: company } = await supabase
+      .from('companies')
+      .select('name, tax_id, address')
+      .eq('id', companyId)
+      .single();
+
+    type SaleRow = { total_amount: string | number; tax_amount: string | number; vatable_amount: string | number; vat_exempt_amount: string | number; zero_rated_amount: string | number; or_number: string; payment_method: string; created_at: string };
+    const typedSales = (sales || []) as SaleRow[];
+
+    const summary = typedSales.reduce((acc, s) => ({
+      total_sales: acc.total_sales + parseFloat(String(s.total_amount || 0)),
+      vat_amount: acc.vat_amount + parseFloat(String(s.tax_amount || 0)),
+      vatable_sales: acc.vatable_sales + parseFloat(String(s.vatable_amount || 0)),
+      vat_exempt_sales: acc.vat_exempt_sales + parseFloat(String(s.vat_exempt_amount || 0)),
+      zero_rated_sales: acc.zero_rated_sales + parseFloat(String(s.zero_rated_amount || 0)),
+    }), { total_sales: 0, vat_amount: 0, vatable_sales: 0, vat_exempt_sales: 0, zero_rated_sales: 0 });
+
+    const paymentBreakdown = typedSales.reduce((acc, s) => {
+      const method = s.payment_method || 'cash';
+      acc[method] = (acc[method] || 0) + parseFloat(String(s.total_amount || 0));
+      return acc;
+    }, {} as Record<string, number>);
+
+    const orNumbers = typedSales.map(s => s.or_number).filter(Boolean);
+    const shiftStart = typedSales.length > 0 ? typedSales[0].created_at : null;
+
+    res.json({
+      date: todayStr,
+      as_of: new Date().toISOString(),
+      shift_start: shiftStart,
+      store,
+      company,
+      transaction_count: typedSales.length,
+      or_from: orNumbers[0] || null,
+      or_to: orNumbers[orNumbers.length - 1] || null,
+      ...summary,
+      payment_breakdown: paymentBreakdown,
+      grand_total_accumulator: parseFloat(String(store?.grand_total_accumulator || 0)),
+    });
+
+  } catch (error) {
+    console.error('Get X-Reading error:', error);
+    res.status(500).json({ error: 'Failed to fetch X-reading data' });
+  }
+}
+
 export {
   createSale,
   getSaleByReceipt,
   getTodaySales,
   getZReading,
   createZReading,
-  getZReadingHistory
+  getZReadingHistory,
+  getXReading
 };

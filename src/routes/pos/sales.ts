@@ -1,5 +1,5 @@
 import express from 'express';
-import { createSale, getSaleByReceipt, getTodaySales, getZReading, createZReading, getZReadingHistory } from '../../controllers/pos/salesController';
+import { createSale, getSaleByReceipt, getTodaySales, getZReading, createZReading, getZReadingHistory, getXReading } from '../../controllers/pos/salesController';
 
 const router = express.Router();
 
@@ -11,6 +11,9 @@ router.get('/receipt/:receipt_number', getSaleByReceipt);
 
 // GET /pos/sales/today
 router.get('/today', getTodaySales);
+
+// GET /pos/sales/x-reading?store_id=xxx
+router.get('/x-reading', getXReading);
 
 // GET /pos/sales/z-reading?store_id=xxx
 router.get('/z-reading', getZReading);
