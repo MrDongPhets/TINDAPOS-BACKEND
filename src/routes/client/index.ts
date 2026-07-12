@@ -32,7 +32,7 @@ router.get('/company', async (req: Request, res: Response) => {
     const db = getDb();
     const { data: companies, error } = await db
       .from('companies')
-      .select('id, name, company_code, contact_email, contact_phone, address, website, logo_url, subscription_status, trial_end_date, subscription_end_date')
+      .select('id, name, company_code, tax_id, contact_email, contact_phone, address, phone, website, logo_url, subscription_status, trial_end_date, subscription_end_date')
       .eq('id', req.user!.company_id)
       .limit(1);
 
@@ -48,6 +48,32 @@ router.get('/company', async (req: Request, res: Response) => {
       ? Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
       : null;
     res.json({ company: { ...company, days_left: daysLeft } });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /client/company — update company profile (name, TIN, address, phone)
+router.patch('/company', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const { name, tax_id, address, phone } = req.body;
+
+    const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (name?.trim()) updateData.name = name.trim();
+    if (tax_id !== undefined) updateData.tax_id = tax_id?.trim() || null;
+    if (address !== undefined) updateData.address = address?.trim() || null;
+    if (phone !== undefined) updateData.phone = phone?.trim() || null;
+
+    const { data: company, error } = await db
+      .from('companies')
+      .update(updateData)
+      .eq('id', req.user!.company_id)
+      .select('id, name, tax_id, address, phone')
+      .single();
+
+    if (error) throw error;
+    res.json({ company, message: 'Company updated successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

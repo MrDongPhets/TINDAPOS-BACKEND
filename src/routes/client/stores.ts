@@ -1,6 +1,6 @@
 // src/routes/client/stores.ts - WITH SWAGGER DOCUMENTATION
 import express from 'express';
-import { getStores, requestStore } from '../../controllers/client/storesController';
+import { getStores, requestStore, updateStore } from '../../controllers/client/storesController';
 
 const router = express.Router();
 
@@ -48,5 +48,6 @@ router.get('/', getStores);
  *         description: Server error
  */
 router.post('/request', requestStore);
+router.patch('/:id', updateStore);
 
 export default router;

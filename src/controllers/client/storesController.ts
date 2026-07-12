@@ -140,7 +140,51 @@ async function getStores(req: Request, res: Response): Promise<void> {
   }
 }
 
+async function updateStore(req: Request, res: Response): Promise<void> {
+  try {
+    const companyId = req.user!.company_id;
+    const { id } = req.params;
+    const supabase = getDb();
+
+    const { name, address, phone, or_prefix } = req.body;
+
+    if (!name?.trim() || !address?.trim()) {
+      res.status(400).json({ error: 'Store name and address are required', code: 'VALIDATION_ERROR' });
+      return;
+    }
+
+    // Ensure or_prefix is safe: letters/numbers only, max 10 chars
+    const safePrefix = or_prefix ? String(or_prefix).replace(/[^A-Za-z0-9]/g, '').slice(0, 10).toUpperCase() : undefined;
+
+    const updateData: Record<string, any> = {
+      name: name.trim(),
+      address: address.trim(),
+      phone: phone?.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (safePrefix) updateData.or_prefix = safePrefix;
+
+    const { data: store, error } = await supabase
+      .from('stores')
+      .update(updateData)
+      .eq('id', id)
+      .eq('company_id', companyId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!store) { res.status(404).json({ error: 'Store not found', code: 'NOT_FOUND' }); return; }
+
+    console.log('✅ Store updated:', id);
+    res.json({ message: 'Store updated successfully', store });
+  } catch (error) {
+    console.error('Update store error:', error);
+    res.status(500).json({ error: 'Failed to update store', code: 'UPDATE_ERROR' });
+  }
+}
+
 export {
   requestStore,
-  getStores
+  getStores,
+  updateStore
 };
