@@ -1,7 +1,7 @@
 // src/controllers/admin/subscriptionsController.ts
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
-import { syncSubscription, expireSubscription } from '../../services/subscriptionService';
+import { syncSubscription, expireSubscription, PLAN_CONFIG } from '../../services/subscriptionService';
 
 // List all companies with subscription info
 async function getSubscriptions(req: Request, res: Response): Promise<void> {
@@ -147,4 +147,152 @@ async function extendTrial(req: Request, res: Response): Promise<void> {
   }
 }
 
-export { getSubscriptions, activateSubscription, deactivateSubscription, extendTrial };
+const EDITABLE_STATUSES = ['trial', 'active', 'expired', 'suspended'];
+
+// Edit plan, status, and end dates directly
+async function updateSubscription(req: Request, res: Response): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const { plan, status, trial_end_date, subscription_end_date } = req.body;
+
+    if (!plan || !PLAN_CONFIG[plan] || plan === 'trial') {
+      res.status(400).json({ error: 'Invalid plan', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    if (!EDITABLE_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'Invalid status', code: 'VALIDATION_ERROR' });
+      return;
+    }
+
+    const trialEnd = trial_end_date ? new Date(trial_end_date) : null;
+    const subEnd = subscription_end_date ? new Date(subscription_end_date) : null;
+    if ((trialEnd && isNaN(trialEnd.getTime())) || (subEnd && isNaN(subEnd.getTime()))) {
+      res.status(400).json({ error: 'Invalid date', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    if (status === 'trial' && !trialEnd) {
+      res.status(400).json({ error: 'Trial end date is required for trial status', code: 'VALIDATION_ERROR' });
+      return;
+    }
+    if (status === 'active' && !subEnd) {
+      res.status(400).json({ error: 'Subscription end date is required for active status', code: 'VALIDATION_ERROR' });
+      return;
+    }
+
+    const supabase = getDb();
+    const { data: updated, error } = await supabase
+      .from('companies')
+      .update({
+        subscription_plan: plan,
+        subscription_status: status,
+        trial_end_date: trialEnd ? trialEnd.toISOString() : null,
+        subscription_end_date: subEnd ? subEnd.toISOString() : null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select('id');
+
+    if (error) throw error;
+    if (!updated || updated.length === 0) {
+      res.status(404).json({ error: 'Company not found', code: 'NOT_FOUND' });
+      return;
+    }
+
+    if (status === 'active') await syncSubscription(id, plan, subEnd!);
+    else if (status === 'trial') await syncSubscription(id, 'trial', trialEnd!);
+    else await expireSubscription(id);
+
+    console.log(`✅ Subscription updated for company ${id}: ${plan} / ${status}`);
+    res.json({ message: 'Subscription updated successfully' });
+  } catch (error) {
+    console.error('❌ Update subscription error:', error);
+    res.status(500).json({ error: 'Failed to update subscription', code: 'UPDATE_ERROR' });
+  }
+}
+
+// Soft delete — hides the company and blocks login, keeps all data (restorable)
+async function deleteCompany(req: Request, res: Response): Promise<void> {
+  await setCompanyActive(req, res, false);
+}
+
+async function restoreCompany(req: Request, res: Response): Promise<void> {
+  await setCompanyActive(req, res, true);
+}
+
+async function setCompanyActive(req: Request, res: Response, isActive: boolean): Promise<void> {
+  const action = isActive ? 'restore' : 'delete';
+  try {
+    const id = req.params.id as string;
+    const supabase = getDb();
+
+    const { data: updated, error } = await supabase
+      .from('companies')
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id, name');
+
+    if (error) throw error;
+    if (!updated || updated.length === 0) {
+      res.status(404).json({ error: 'Company not found', code: 'NOT_FOUND' });
+      return;
+    }
+
+    console.log(`✅ Company ${isActive ? 'restored' : 'soft-deleted'}: ${updated[0].name} (${id})`);
+    res.json({ message: `Company ${isActive ? 'restored' : 'deleted'} successfully` });
+  } catch (error) {
+    console.error(`❌ ${action} company error:`, error);
+    res.status(500).json({ error: `Failed to ${action} company`, code: `${action.toUpperCase()}_ERROR` });
+  }
+}
+
+// Permanent delete — removes the company and ALL its data. Requires typing the exact company name.
+async function permanentlyDeleteCompany(req: Request, res: Response): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const { confirm_name } = req.body;
+    const supabase = getDb();
+
+    const { data: company, error: findError } = await supabase
+      .from('companies')
+      .select('id, name')
+      .eq('id', id)
+      .single();
+
+    if (findError || !company) {
+      res.status(404).json({ error: 'Company not found', code: 'NOT_FOUND' });
+      return;
+    }
+    if (confirm_name !== company.name) {
+      res.status(400).json({ error: 'Company name does not match', code: 'CONFIRMATION_MISMATCH' });
+      return;
+    }
+
+    const { error } = await supabase.rpc('admin_delete_company', { p_company_id: id });
+    if (error?.code === 'PGRST202') {
+      console.error('❌ admin_delete_company function missing — run src/db/migrations/admin_delete_company.sql');
+      res.status(500).json({
+        error: 'Delete function not installed. Run the admin_delete_company.sql migration in Supabase.',
+        code: 'MIGRATION_MISSING'
+      });
+      return;
+    }
+    if (error) throw error;
+
+    console.log(`⚠️ Company PERMANENTLY deleted: ${company.name} (${id}) by admin ${req.user!.id}`);
+    res.json({ message: 'Company permanently deleted' });
+  } catch (error) {
+    console.error('❌ Permanent delete company error:', error);
+    res.status(500).json({ error: 'Failed to permanently delete company', code: 'PERMANENT_DELETE_ERROR' });
+  }
+}
+
+export {
+  getSubscriptions,
+  activateSubscription,
+  deactivateSubscription,
+  extendTrial,
+  updateSubscription,
+  deleteCompany,
+  restoreCompany,
+  permanentlyDeleteCompany,
+};

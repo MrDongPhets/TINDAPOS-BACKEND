@@ -89,6 +89,25 @@ async function clientLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Block login for soft-deleted companies
+    if (userCheck.company_id) {
+      const { data: activeCompany } = await supabase
+        .from('companies')
+        .select('id')
+        .eq('id', userCheck.company_id)
+        .eq('is_active', true)
+        .limit(1);
+
+      if (!activeCompany || activeCompany.length === 0) {
+        console.log('❌ Company account is inactive');
+        res.status(401).json({
+          error: 'This business account has been deactivated. Please contact support.',
+          code: 'COMPANY_INACTIVE'
+        });
+        return;
+      }
+    }
+
     // Guard: account has no password (e.g. Google OAuth only)
     if (!userCheck.password) {
       console.log('❌ Account has no password (OAuth-only account)');

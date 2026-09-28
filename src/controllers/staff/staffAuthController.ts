@@ -79,6 +79,22 @@ async function staffLogin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Block login for soft-deleted companies
+    const { data: activeCompany } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('id', staff.company_id)
+      .eq('is_active', true)
+      .limit(1);
+
+    if (!activeCompany || activeCompany.length === 0) {
+      res.status(401).json({
+        error: 'This business account has been deactivated. Please contact the owner.',
+        code: 'COMPANY_INACTIVE'
+      });
+      return;
+    }
+
     // Generate token for staff
     const token = generateToken({
       id: staff.id,
