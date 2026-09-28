@@ -24,7 +24,11 @@ async function getSubscriptions(req: Request, res: Response): Promise<void> {
       if (endDate) {
         daysLeft = Math.ceil((new Date(endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
       }
-      return { ...c, days_left: daysLeft };
+      // Stored status only flips to 'expired' on the company's next request (requireActiveSubscription),
+      // so show the effective status here to keep the list and stats accurate
+      const isLapsed = (c.subscription_status === 'active' || c.subscription_status === 'trial')
+        && !!endDate && new Date(endDate) <= now;
+      return { ...c, subscription_status: isLapsed ? 'expired' : c.subscription_status, days_left: daysLeft };
     });
 
     res.json({ companies: enriched, count: enriched.length });
