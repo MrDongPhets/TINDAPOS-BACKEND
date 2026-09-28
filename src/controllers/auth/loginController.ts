@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { getEffectiveSubscription } from '../../services/subscriptionService';
 import { generateToken } from '../../services/tokenService';
 
 // In-memory rate limiter: email → { attempts, lockedUntil }
@@ -122,7 +123,7 @@ async function clientLogin(req: Request, res: Response): Promise<void> {
       .from('users')
       .select(`
         *,
-        companies!inner(*)
+        companies!fk_users_company(*)
       `)
       .eq('email', email.toLowerCase())
       .eq('is_active', true)
@@ -153,11 +154,7 @@ async function clientLogin(req: Request, res: Response): Promise<void> {
       .eq('id', user.id);
 
     // Get subscription
-    const { data: subscription } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('company_id', user.company_id)
-      .single();
+    const subscription = await getEffectiveSubscription(user.company_id);
 
     clearAttempts(email.toLowerCase());
     const token = generateToken(user, 'client');

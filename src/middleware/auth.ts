@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedUser } from '../types/express.d';
 import { getDb } from '../config/database';
+import { getEffectiveSubscription } from '../services/subscriptionService';
 
 function authenticateToken(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers['authorization'];
@@ -143,12 +144,7 @@ async function requireAdvancedReports(req: Request, res: Response, next: NextFun
       return;
     }
 
-    const supabase = getDb();
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('plan_name, features')
-      .eq('company_id', companyId)
-      .single();
+    const sub = await getEffectiveSubscription(companyId);
 
     const isTrial = !sub || sub.plan_name === 'trial';
     const hasReports = isTrial || sub.features?.reports === true;

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { getDb } from '../../config/database';
+import { syncSubscription } from '../../services/subscriptionService';
 
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
 
@@ -197,6 +198,8 @@ export async function handleWebhook(req: Request, res: Response): Promise<void> 
       res.status(500).json({ error: 'DB update failed' });
       return;
     }
+
+    await syncSubscription(company_id, plan, endDate);
 
     console.log(`✅ Subscription auto-activated via webhook: company=${company_id} plan=${plan} until=${endDate.toISOString()}`);
     res.json({ received: true });

@@ -1,6 +1,7 @@
 // src/controllers/admin/subscriptionsController.ts
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { syncSubscription, expireSubscription } from '../../services/subscriptionService';
 
 // List all companies with subscription info
 async function getSubscriptions(req: Request, res: Response): Promise<void> {
@@ -9,7 +10,7 @@ async function getSubscriptions(req: Request, res: Response): Promise<void> {
 
     const { data: companies, error } = await supabase
       .from('companies')
-      .select('id, name, contact_email, subscription_status, trial_end_date, subscription_end_date, is_active, created_at')
+      .select('id, name, contact_email, subscription_status, subscription_plan, trial_end_date, subscription_end_date, is_active, created_at')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -58,6 +59,8 @@ async function activateSubscription(req: Request, res: Response): Promise<void> 
 
     if (error) throw error;
 
+    await syncSubscription(company_id, plan, endDate);
+
     console.log(`✅ Subscription activated for company ${company_id} (${plan}) until ${endDate.toISOString()}`);
     res.json({
       message: 'Subscription activated successfully',
@@ -90,6 +93,8 @@ async function deactivateSubscription(req: Request, res: Response): Promise<void
       .eq('id', company_id);
 
     if (error) throw error;
+
+    await expireSubscription(company_id);
 
     console.log(`✅ Subscription deactivated for company ${company_id}`);
     res.json({ message: 'Subscription deactivated successfully' });
@@ -131,6 +136,8 @@ async function extendTrial(req: Request, res: Response): Promise<void> {
       .eq('id', company_id);
 
     if (error) throw error;
+
+    await syncSubscription(company_id, 'trial', baseDate);
 
     console.log(`✅ Trial extended for company ${company_id} until ${baseDate.toISOString()}`);
     res.json({ message: 'Trial extended successfully', trial_end_date: baseDate.toISOString() });

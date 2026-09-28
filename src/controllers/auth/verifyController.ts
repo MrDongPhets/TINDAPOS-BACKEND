@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { getEffectiveSubscription } from '../../services/subscriptionService';
 
 async function verifyToken(req: Request, res: Response): Promise<void> {
   try {
@@ -96,7 +97,7 @@ async function getMe(req: Request, res: Response): Promise<void> {
 
     const { data: user } = await supabase
       .from('users')
-      .select('*, companies(*)')
+      .select('*, companies!fk_users_company(*)')
       .eq('id', userId)
       .eq('is_active', true)
       .single();
@@ -106,11 +107,7 @@ async function getMe(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { data: subscription } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('company_id', user.company_id)
-      .single();
+    const subscription = await getEffectiveSubscription(user.company_id);
 
     const { password: _, ...userWithoutPassword } = user;
 
