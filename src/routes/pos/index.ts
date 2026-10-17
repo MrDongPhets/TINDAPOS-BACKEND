@@ -10,6 +10,8 @@ import stockCountRoutes from './stockCount';
 import utangRoutes from '../client/utang';
 import attendanceRoutes from './attendance';
 import webauthnRoutes from './webauthn';
+import gcashRoutes from './gcash';
+import expensesRoutes from './expenses';
 
 const router = express.Router();
 
@@ -45,5 +47,7 @@ router.use('/stock-counts', stockCountRoutes);
 router.use('/utang', utangRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/webauthn', webauthnRoutes);
+router.use('/gcash', gcashRoutes);
+router.use('/expenses', expensesRoutes);
 
 export default router;

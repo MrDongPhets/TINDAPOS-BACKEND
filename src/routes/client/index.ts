@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { authenticateToken, requireClient, requireActiveSubscription, requireAdvancedReports } from '../../middleware/auth';
 import { getDb } from '../../config/database';
 import bcrypt from 'bcryptjs';
+import { updateGcashSettings } from '../../controllers/pos/gcashController';
 
 import dashboardRoutes from './dashboard';
 import productsRoutes from './products';
@@ -157,6 +158,9 @@ router.put('/settings/receipt', async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// PUT /client/settings/gcash — GCash cash-in/cash-out fee rules
+router.put('/settings/gcash', updateGcashSettings);
 
 // PATCH /client/settings/biometric — toggle biometric clock-in (Laking Negosyo only)
 router.patch('/settings/biometric', requireAdvancedReports, async (req: Request, res: Response) => {

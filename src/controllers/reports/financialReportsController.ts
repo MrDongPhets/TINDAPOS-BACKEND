@@ -1,6 +1,52 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 
+// Cost per unit sold, most accurate first:
+//   1. sales_items.cost_price — actual FIFO cost recorded at sale time
+//   2. products.cost_price    — current cost (older sales recorded before FIFO)
+//   3. 70% of unit price      — last-resort estimate (counted so the UI can flag it)
+const FALLBACK_COST_RATIO = 0.7;
+
+function unitCost(item: { cost_price?: number | string | null; unit_price: number | string; products?: { cost_price?: number | null } | null }) {
+  const saleCost = Number(item.cost_price);
+  if (saleCost > 0) return { cost: saleCost, estimated: false };
+  const productCost = Number(item.products?.cost_price);
+  if (productCost > 0) return { cost: productCost, estimated: false };
+  return { cost: Number(item.unit_price) * FALLBACK_COST_RATIO, estimated: true };
+}
+
+// Missing-table errors (gcash_expenses.sql not run yet) → treat as zero instead of failing the report
+const isMissingTable = (error: { code?: string } | null) => !!error && ['42P01', 'PGRST205', 'SQLITE_ERROR'].includes(error.code || '');
+
+// Sum of manual expenses + GCash fee income for the report period.
+// No store filter = whole company (includes company-wide expenses with store_id NULL).
+async function getExpensesAndGcashFees(
+  db: ReturnType<typeof getDb>,
+  companyId: string,
+  storeId?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<{ operatingExpenses: number; gcashFeeIncome: number }> {
+  let expensesQuery = db.from('expenses').select('amount').eq('company_id', companyId);
+  if (storeId) expensesQuery = expensesQuery.eq('store_id', storeId);
+  if (startDate) expensesQuery = expensesQuery.gte('expense_date', startDate.slice(0, 10));
+  if (endDate) expensesQuery = expensesQuery.lte('expense_date', endDate.slice(0, 10));
+
+  let gcashQuery = db.from('gcash_transactions').select('fee').eq('company_id', companyId);
+  if (storeId) gcashQuery = gcashQuery.eq('store_id', storeId);
+  if (startDate) gcashQuery = gcashQuery.gte('created_at', startDate);
+  if (endDate) gcashQuery = gcashQuery.lte('created_at', endDate);
+
+  const [expensesResult, gcashResult] = await Promise.all([expensesQuery, gcashQuery]);
+  if (expensesResult.error && !isMissingTable(expensesResult.error)) throw expensesResult.error;
+  if (gcashResult.error && !isMissingTable(gcashResult.error)) throw gcashResult.error;
+
+  return {
+    operatingExpenses: (expensesResult.data || []).reduce((s: number, e: { amount: number | string }) => s + Number(e.amount || 0), 0),
+    gcashFeeIncome: (gcashResult.data || []).reduce((s: number, g: { fee: number | string }) => s + Number(g.fee || 0), 0),
+  };
+}
+
 // Get financial summary
 async function getFinancialReports(req: Request, res: Response): Promise<void> {
   try {
@@ -54,20 +100,22 @@ async function getFinancialReports(req: Request, res: Response): Promise<void> {
 
     const salesIds = (sales as Array<{ id: string }>).map(s => s.id);
 
-    // Get sales items to calculate COGS (use default_price * 0.7 as estimated cost)
+    // COGS from actual recorded costs (see unitCost)
     let cogs = 0;
+    let cogsEstimatedItems = 0;
     if (salesIds.length > 0) {
       const { data: salesItems, error: itemsError } = await supabase
         .from('sales_items')
-        .select('quantity, unit_price')
+        .select('quantity, unit_price, cost_price, products!sales_items_product_id_fkey(cost_price)')
         .in('sales_id', salesIds);
 
       if (itemsError) throw itemsError;
 
-      // Estimate COGS as 70% of sales price (you can adjust this multiplier)
-      cogs = (salesItems as Array<{ unit_price: number; quantity: number }>).reduce((sum, item) => {
-        return sum + (item.unit_price * 0.7 * item.quantity);
-      }, 0);
+      for (const item of (salesItems || []) as Array<{ quantity: number | string; unit_price: number | string; cost_price?: number | string | null; products?: { cost_price?: number | null } | null }>) {
+        const { cost, estimated } = unitCost(item);
+        cogs += cost * Number(item.quantity);
+        if (estimated) cogsEstimatedItems++;
+      }
     }
 
     // Calculate financial metrics
@@ -81,15 +129,25 @@ async function getFinancialReports(req: Request, res: Response): Promise<void> {
     const totalDiscount = typedSales.reduce((sum, s) => sum + parseFloat(String(s.discount_amount || 0)), 0);
     const totalTax = typedSales.reduce((sum, s) => sum + parseFloat(String(s.tax_amount || 0)), 0);
     const grossProfit = totalRevenue - cogs;
-    const netProfit = grossProfit - totalDiscount;
+
+    // Operating expenses (rent, electricity, ...) and GCash cash-in/out fee income
+    const { operatingExpenses, gcashFeeIncome } = await getExpensesAndGcashFees(
+      supabase, companyId as string, store_id as string | undefined, start_date as string | undefined, end_date as string | undefined
+    );
+
+    // total_amount is already after discounts — don't subtract them again
+    const netProfit = grossProfit - operatingExpenses + gcashFeeIncome;
 
     const summary = {
       total_revenue: parseFloat(totalRevenue.toFixed(2)),
       total_cogs: parseFloat(cogs.toFixed(2)),
+      cogs_estimated_items: cogsEstimatedItems,
       gross_profit: parseFloat(grossProfit.toFixed(2)),
       gross_margin: totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : 0,
       total_discount: parseFloat(totalDiscount.toFixed(2)),
       total_tax: parseFloat(totalTax.toFixed(2)),
+      operating_expenses: parseFloat(operatingExpenses.toFixed(2)),
+      gcash_fee_income: parseFloat(gcashFeeIncome.toFixed(2)),
       net_profit: parseFloat(netProfit.toFixed(2)),
       net_margin: totalRevenue > 0 ? parseFloat(((netProfit / totalRevenue) * 100).toFixed(2)) : 0,
       total_transactions: sales.length
@@ -176,6 +234,7 @@ async function getProfitMargins(req: Request, res: Response): Promise<void> {
       .select(`
         quantity,
         unit_price,
+        cost_price,
         total_price,
         discount_amount,
         product_id,
@@ -208,6 +267,7 @@ async function getProfitMargins(req: Request, res: Response): Promise<void> {
     (salesItems as Array<{
       quantity: string | number;
       unit_price: number;
+      cost_price?: number | string | null;
       total_price: string | number;
       discount_amount?: string | number;
       product_id: string;
@@ -250,13 +310,9 @@ async function getProfitMargins(req: Request, res: Response): Promise<void> {
         }
       }
 
-      // Use actual cost_price if available, otherwise estimate as 70% of unit price
-      const estimatedCost = (item.products?.cost_price != null && item.products.cost_price > 0)
-        ? item.products.cost_price
-        : item.unit_price * 0.7;
       const quantity = parseInt(String(item.quantity));
       const revenue = parseFloat(String(item.total_price));
-      const itemCogs = estimatedCost * quantity;
+      const itemCogs = unitCost(item).cost * quantity;
 
       grouped[key].total_revenue += revenue;
       grouped[key].total_cogs += itemCogs;
@@ -271,7 +327,8 @@ async function getProfitMargins(req: Request, res: Response): Promise<void> {
         ? (grossProfit / item.total_revenue) * 100
         : 0;
 
-      const netProfit = grossProfit - item.total_discount;
+      // total_price is already after the item discount — net = gross at item level
+      const netProfit = grossProfit;
       const netMargin = item.total_revenue > 0
         ? (netProfit / item.total_revenue) * 100
         : 0;

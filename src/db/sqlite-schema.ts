@@ -328,6 +328,39 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- GCash cash-in / cash-out (store income = fee)
+    CREATE TABLE IF NOT EXISTS gcash_transactions (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      company_id TEXT NOT NULL,
+      store_id TEXT,
+      type TEXT NOT NULL CHECK (type IN ('cash_in', 'cash_out')),
+      amount REAL NOT NULL,
+      fee REAL NOT NULL DEFAULT 0,
+      customer_name TEXT,
+      reference_number TEXT,
+      notes TEXT,
+      created_by TEXT,
+      staff_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Expenses (rent, electricity, salary, ...)
+    CREATE TABLE IF NOT EXISTS expenses (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      company_id TEXT NOT NULL,
+      store_id TEXT,
+      category TEXT NOT NULL DEFAULT 'other',
+      description TEXT,
+      amount REAL NOT NULL,
+      expense_date TEXT NOT NULL DEFAULT (date('now')),
+      payment_method TEXT NOT NULL DEFAULT 'cash',
+      created_by TEXT,
+      staff_id TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Staff WebAuthn Credentials
     CREATE TABLE IF NOT EXISTS staff_webauthn_credentials (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

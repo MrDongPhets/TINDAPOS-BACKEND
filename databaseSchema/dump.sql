@@ -381,6 +381,45 @@ CREATE TABLE public.subscription_usage (
   CONSTRAINT subscription_usage_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES public.subscriptions(id),
   CONSTRAINT subscription_usage_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id)
 );
+CREATE TABLE public.gcash_transactions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL,
+  store_id character varying,
+  type character varying NOT NULL CHECK (type::text = ANY (ARRAY['cash_in'::character varying, 'cash_out'::character varying]::text[])),
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  fee numeric NOT NULL DEFAULT 0 CHECK (fee >= 0::numeric),
+  customer_name character varying,
+  reference_number character varying,
+  notes text,
+  created_by uuid,
+  staff_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT gcash_transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT gcash_transactions_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
+  CONSTRAINT gcash_transactions_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id),
+  CONSTRAINT gcash_transactions_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
+  CONSTRAINT gcash_transactions_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.staff(id)
+);
+CREATE TABLE public.expenses (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL,
+  store_id character varying,
+  category character varying NOT NULL DEFAULT 'other'::character varying CHECK (category::text = ANY (ARRAY['rent'::character varying, 'electricity'::character varying, 'water'::character varying, 'internet'::character varying, 'salary'::character varying, 'supplies'::character varying, 'transportation'::character varying, 'maintenance'::character varying, 'taxes'::character varying, 'other'::character varying]::text[])),
+  description text,
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  expense_date date NOT NULL DEFAULT CURRENT_DATE,
+  payment_method character varying NOT NULL DEFAULT 'cash'::character varying CHECK (payment_method::text = ANY (ARRAY['cash'::character varying, 'gcash'::character varying, 'bank'::character varying, 'other'::character varying]::text[])),
+  created_by uuid,
+  staff_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT expenses_pkey PRIMARY KEY (id),
+  CONSTRAINT expenses_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(id),
+  CONSTRAINT expenses_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id),
+  CONSTRAINT expenses_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id),
+  CONSTRAINT expenses_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.staff(id)
+);
 CREATE TABLE public.subscriptions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL,

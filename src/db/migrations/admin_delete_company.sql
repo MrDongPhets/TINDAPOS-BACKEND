@@ -53,6 +53,10 @@ BEGIN
   DELETE FROM products              WHERE id = ANY(v_product_ids);
   DELETE FROM categories            WHERE store_id = ANY(v_store_ids);
 
+  -- GCash + expenses (gcash_expenses.sql)
+  DELETE FROM gcash_transactions WHERE company_id = p_company_id OR store_id = ANY(v_store_ids) OR staff_id = ANY(v_staff_ids);
+  DELETE FROM expenses           WHERE company_id = p_company_id OR store_id = ANY(v_store_ids) OR staff_id = ANY(v_staff_ids);
+
   -- Staff
   DELETE FROM staff_attendance           WHERE company_id = p_company_id OR staff_id = ANY(v_staff_ids);
   DELETE FROM staff_webauthn_credentials WHERE company_id = p_company_id OR staff_id = ANY(v_staff_ids);
