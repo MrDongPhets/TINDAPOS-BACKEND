@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { depleteBatchesFIFO } from '../../services/fifoService';
+import { reserveOrNumber, addToGrandTotal } from '../../services/receiptCounterService';
 
 // Create sale transaction
 async function createSale(req: Request, res: Response): Promise<void> {
@@ -42,19 +43,12 @@ async function createSale(req: Request, res: Response): Promise<void> {
     // Generate receipt number (internal reference)
     const receipt_number = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
 
-    // Fetch store data and product VAT types in parallel (independent queries)
+    // Fetch product VAT types
     const productIds = (items as Array<{ product_id: string }>).map(i => i.product_id);
-    const [storeResult, productVatResult] = await Promise.all([
-      supabase.from('stores').select('or_counter, or_prefix, grand_total_accumulator').eq('id', store_id).single(),
-      supabase.from('products').select('id, vat_type').in('id', productIds)
-    ]);
-
-    const storeData = storeResult.data;
-    const productVatData = productVatResult.data;
-
-    const newCounter = (storeData?.or_counter || 0) + 1;
-    const orPrefix = storeData?.or_prefix || 'OR';
-    const or_number = `${orPrefix}-${String(newCounter).padStart(8, '0')}`;
+    const { data: productVatData } = await supabase
+      .from('products')
+      .select('id, vat_type')
+      .in('id', productIds);
 
     const vatTypeMap = new Map((productVatData || []).map((p: { id: string; vat_type: string }) => [p.id, p.vat_type || 'vatable']));
 
@@ -82,7 +76,10 @@ async function createSale(req: Request, res: Response): Promise<void> {
     // VAT = vatable * 12/112 (VAT-inclusive computation)
     const vatAmount = isScPwd ? 0 : parseFloat((vatableAmount * 12 / 112).toFixed(2));
 
-    console.log('📝 Creating sale record...');
+    // Reserve the OR number atomically (BIR: unique + sequential per store), right before the insert
+    const or_number = await reserveOrNumber(supabase, store_id);
+
+    console.log('📝 Creating sale record...', or_number);
 
     // Start transaction - Create sale
     const { data: sale, error: saleError } = await supabase
@@ -112,7 +109,8 @@ async function createSale(req: Request, res: Response): Promise<void> {
       .single();
 
     if (saleError) {
-      console.error('❌ Sale creation error:', saleError);
+      // The reserved OR number is now unused — log it so the gap in the sequence is traceable
+      console.error(`❌ Sale creation error — OR ${or_number} reserved but not used:`, saleError);
       throw saleError;
     }
 
@@ -266,12 +264,13 @@ async function createSale(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Update store OR counter and grand total accumulator
-    const newGrandTotal = parseFloat(String(storeData?.grand_total_accumulator || 0)) + parseFloat(String(total_amount));
-    await supabase
-      .from('stores')
-      .update({ or_counter: newCounter, grand_total_accumulator: newGrandTotal })
-      .eq('id', store_id);
+    // Add to store's non-resettable grand total accumulator (atomic)
+    try {
+      await addToGrandTotal(supabase, store_id, parseFloat(String(total_amount)));
+    } catch (accumulatorError) {
+      // Sale is already saved — don't fail the checkout, but this must be investigated (BIR figure)
+      console.error(`❌ Grand total accumulator update failed for ${or_number}:`, accumulatorError);
+    }
 
     console.log('✅ Sale completed:', or_number);
 
