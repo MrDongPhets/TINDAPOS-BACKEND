@@ -1,4 +1,5 @@
 import express from 'express';
+import { lookupBarcode } from '../../controllers/client/barcodeLookupController';
 import {
   getProducts,
   getProduct,
@@ -17,6 +18,7 @@ const router = express.Router();
 router.get('/', getProducts);
 router.get('/categories', getCategories);
 router.post('/bulk-adjust', bulkAdjustStock); // Must be before /:id
+router.get('/barcode-lookup/:barcode', lookupBarcode); // Must be before /:id
 router.get('/:id', getProduct);
 router.post('/', createProduct);
 router.put('/:id', updateProduct);
