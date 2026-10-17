@@ -5,10 +5,11 @@ import { generateToken } from '../../services/tokenService';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 
+// Must exactly match an "Authorized redirect URI" in Google Cloud Console
 function getRedirectUri(): string {
-  return process.env.NODE_ENV === 'production'
-    ? 'https://kitaposapi.mrdongphets.com/auth/google/callback'
-    : 'http://localhost:3001/auth/google/callback';
+  const backendUrl = process.env.BACKEND_URL
+    || (process.env.NODE_ENV === 'production' ? 'https://api.tindapo.com' : 'http://localhost:3001');
+  return `${backendUrl}/auth/google/callback`;
 }
 
 function getFrontendUrl(): string {
