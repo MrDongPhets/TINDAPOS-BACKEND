@@ -1,0 +1,65 @@
+# Build on GitHub (not on the 512 MB droplet), then ship dist/ and reload PM2.
+#
+# Required repo secrets (GitHub → Settings → Secrets and variables → Actions):
+#   DROPLET_HOST     droplet IP or api.tindapo.com
+#   DROPLET_SSH_KEY  private key whose public half is in /home/deploy/.ssh/authorized_keys
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install & build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package release
+        run: tar czf release.tgz dist package.json package-lock.json ecosystem.config.js
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DROPLET_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload & restart
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DROPLET_HOST }}"
+          scp -i ~/.ssh/deploy_key release.tgz deploy@${{ secrets.DROPLET_HOST }}:/home/deploy/release.tgz
+          $SSH 'set -e
+            cd /home/deploy/tindapo-backend
+            rm -rf dist
+            tar xzf /home/deploy/release.tgz
+            mkdir -p logs
+            npm ci --omit=dev --no-audit --no-fund
+            pm2 startOrReload ecosystem.config.js --update-env
+            pm2 save
+            rm -f /home/deploy/release.tgz'
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DROPLET_HOST }} 'curl -fs http://127.0.0.1:3001/health'; then
+              echo "✅ Healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Health check failed"; exit 1

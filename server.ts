@@ -18,6 +18,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Behind one reverse proxy (Nginx on the Droplet / Render) — use X-Forwarded-For for real client IPs,
+// otherwise every user shares the proxy IP and the rate limiter blocks everyone at once
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(configureCORS());
 app.use(globalLimiter);
