@@ -41,7 +41,7 @@ async function getSubscriptions(req: Request, res: Response): Promise<void> {
 // Activate subscription for a company (set active + end date)
 async function activateSubscription(req: Request, res: Response): Promise<void> {
   try {
-    const { company_id, months = 1, plan = 'basic' } = req.body;
+    const { company_id, months = 1, plan = 'negosyo' } = req.body;
     if (!company_id) {
       res.status(400).json({ error: 'company_id is required', code: 'MISSING_FIELDS' });
       return;
