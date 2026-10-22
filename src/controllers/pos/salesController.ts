@@ -3,6 +3,7 @@ import { getDb } from '../../config/database';
 import { depleteBatchesFIFO } from '../../services/fifoService';
 import { reserveOrNumber, addToGrandTotal } from '../../services/receiptCounterService';
 import { getInvoiceSeller } from '../../services/invoiceSellerService';
+import { computeSaleVat, normalizeVatStatus, type ProductVatType } from '../../services/vatService';
 
 // Create sale transaction
 async function createSale(req: Request, res: Response): Promise<void> {
@@ -44,38 +45,28 @@ async function createSale(req: Request, res: Response): Promise<void> {
     // Generate receipt number (internal reference)
     const receipt_number = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
 
-    // Fetch product VAT types
+    // Product VAT types + the company's BIR VAT status (non-VAT stores record no VAT)
     const productIds = (items as Array<{ product_id: string }>).map(i => i.product_id);
-    const { data: productVatData } = await supabase
-      .from('products')
-      .select('id, vat_type')
-      .in('id', productIds);
-
+    const [{ data: productVatData }, { data: companyVat }] = await Promise.all([
+      supabase.from('products').select('id, vat_type').in('id', productIds),
+      supabase.from('companies').select('vat_status').eq('id', companyId).limit(1),
+    ]);
+    const vatStatus = normalizeVatStatus(companyVat?.[0]?.vat_status);
     const vatTypeMap = new Map((productVatData || []).map((p: { id: string; vat_type: string }) => [p.id, p.vat_type || 'vatable']));
 
-    // Compute VAT breakdown (VAT-inclusive: price already includes 12% VAT)
-    let vatableAmount = 0;
-    let vatExemptAmount = 0;
-    let zeroRatedAmount = 0;
-
-    for (const item of items as Array<{ product_id: string; quantity: number; price: number; discount_amount?: number }>) {
-      const itemTotal = (item.price * item.quantity) - (item.discount_amount || 0);
-      const vatType = vatTypeMap.get(item.product_id) || 'vatable';
-      if (vatType === 'vat_exempt') vatExemptAmount += itemTotal;
-      else if (vatType === 'zero_rated') zeroRatedAmount += itemTotal;
-      else vatableAmount += itemTotal;
-    }
-
-    // SC/PWD discount: entire sale is VAT-exempt (RA 9994 / RA 7277)
-    const isScPwd = discount_type === 'senior_citizen' || discount_type === 'pwd'
-    if (isScPwd) {
-      vatExemptAmount = parseFloat(String(total_amount))
-      vatableAmount = 0
-      zeroRatedAmount = 0
-    }
-
-    // VAT = vatable * 12/112 (VAT-inclusive computation)
-    const vatAmount = isScPwd ? 0 : parseFloat((vatableAmount * 12 / 112).toFixed(2));
+    const saleVat = computeSaleVat({
+      items: (items as Array<{ product_id: string; quantity: number; price: number; discount_amount?: number }>).map(item => ({
+        total: (item.price * item.quantity) - (item.discount_amount || 0),
+        vatType: (vatTypeMap.get(item.product_id) || 'vatable') as ProductVatType,
+      })),
+      discountType: discount_type,
+      totalAmount: parseFloat(String(total_amount)),
+      vatStatus,
+    });
+    const vatableAmount = saleVat.vatable_amount;
+    const vatExemptAmount = saleVat.vat_exempt_amount;
+    const zeroRatedAmount = saleVat.zero_rated_amount;
+    const vatAmount = saleVat.tax_amount;
 
     // Reserve the OR number atomically (BIR: unique + sequential per store), right before the insert
     const or_number = await reserveOrNumber(supabase, store_id);

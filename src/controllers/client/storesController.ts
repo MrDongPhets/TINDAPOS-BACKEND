@@ -114,7 +114,7 @@ async function getStores(req: Request, res: Response): Promise<void> {
 
     const [storesResult, companyResult] = await Promise.all([
       supabase.from('stores').select('*').eq('company_id', companyId).order('created_at', { ascending: false }),
-      supabase.from('companies').select('subscription_plan').eq('id', companyId).single()
+      supabase.from('companies').select('subscription_plan, vat_status').eq('id', companyId).single()
     ]);
 
     if (storesResult.error) throw storesResult.error;
@@ -128,7 +128,9 @@ async function getStores(req: Request, res: Response): Promise<void> {
       stores: storesResult.data || [],
       count: storesResult.data?.length || 0,
       plan,
-      store_limit: storeLimit
+      store_limit: storeLimit,
+      // BIR VAT status — the POS uses it for the SC/PWD discount and whether invoices show VAT
+      vat_status: companyResult.data?.vat_status || 'vat'
     });
 
   } catch (error) {
