@@ -12,6 +12,7 @@ import { errorHandler } from './src/middleware/errorHandler';
 import { globalLimiter } from './src/middleware/rateLimiter';
 import routes from './src/routes/index';
 import { ensureDemoData } from './src/services/demoDataService';
+import { startEinvoiceWorker } from './src/services/eis/eisIssuer';
 import uploadRoutes from './src/routes/client/upload';
 
 const app = express();
@@ -205,6 +206,8 @@ async function startServer(): Promise<void> {
     // Ensure demo data exists
     await ensureDemoData();
     console.log('✅ Demo data verified');
+    // Retry e-invoices TaxTrail didn't issue at checkout (Invoicing plan P2-4)
+    startEinvoiceWorker();
   } else {
     console.error('❌ Failed to initialize database. Server running in degraded mode.');
   }

@@ -3,6 +3,7 @@ import { getDb } from '../../config/database';
 import { depleteBatchesFIFO } from '../../services/fifoService';
 import { reserveOrNumber, addToGrandTotal } from '../../services/receiptCounterService';
 import { getInvoiceSeller } from '../../services/invoiceSellerService';
+import { issueSaleEinvoice } from '../../services/eis/eisIssuer';
 import { computeSaleVat, normalizeVatStatus, type ProductVatType } from '../../services/vatService';
 
 // SC/PWD beneficiary: same ID characters TaxTrail accepts (letters, digits, dashes, slashes, spaces)
@@ -300,9 +301,14 @@ async function createSale(req: Request, res: Response): Promise<void> {
     // BIR seller details for the invoice (null → the app falls back to cached company/store data)
     const seller = await getInvoiceSeller(supabase, companyId as string, store_id);
 
+    // E-invoice store: TaxTrail issues the invoice now (short wait); if it can't, it stays pending and the
+    // retry worker issues it later. Never fails the checkout — the sale is already saved.
+    const einvoice = storeRows?.[0]?.invoicing_mode === 'eis' ? await issueSaleEinvoice(sale.id) : null;
+
     res.status(201).json({
       sale: { ...sale, or_number, vatable_amount: vatableAmount, vat_exempt_amount: vatExemptAmount, zero_rated_amount: zeroRatedAmount, tax_amount: vatAmount },
       seller,
+      einvoice,
       receipt_number,
       or_number,
       message: 'Sale completed successfully'

@@ -1,6 +1,7 @@
 // src/controllers/client/salesController.ts - Sales Management Backend
 import { Request, Response } from 'express';
 import { getInvoiceSeller } from '../../services/invoiceSellerService';
+import { getSaleEinvoice } from '../../services/eis/eisIssuer';
 import { getDb } from '../../config/database';
 
 // Get all sales with filters and pagination
@@ -173,6 +174,7 @@ async function getSaleDetails(req: Request, res: Response): Promise<void> {
 
     // BIR seller details for reprinting the invoice
     const seller = await getInvoiceSeller(supabase, companyId as string, sale.store_id);
+    const einvoice = await getSaleEinvoice(sale.id);
 
     res.json({
       sale: {
@@ -180,6 +182,7 @@ async function getSaleDetails(req: Request, res: Response): Promise<void> {
         items: items || []
       },
       seller,
+      einvoice,
       timestamp: new Date().toISOString()
     });
 

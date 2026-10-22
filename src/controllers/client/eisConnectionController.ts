@@ -4,6 +4,7 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { decryptSecret, encryptionConfigured, encryptSecret } from '../../services/eis/secretBox';
+import { requeueConfigErrors } from '../../services/eis/eisIssuer';
 import { API_KEY_PATTERN, describeWhoAmI, normalizeBaseUrl, whoami } from '../../services/eis/taxtrailClient';
 
 type ConnectionRow = {
@@ -95,6 +96,7 @@ export async function saveEisConnection(req: Request, res: Response): Promise<vo
     if (error) throw error;
 
     const check = await checkAndRecord(companyId, url.value, apiKey);
+    if (check.ok) await requeueConfigErrors(companyId);
     console.log(`🔌 E-invoicing connection saved for company ${companyId}: ${check.ok ? 'OK' : 'not ready'}`);
     res.json({ ...publicView(await loadConnection(companyId)), key_environment: check.environment, encryption_ready: true });
   } catch (error) {
@@ -110,6 +112,7 @@ export async function testEisConnection(req: Request, res: Response): Promise<vo
     const existing = await loadConnection(companyId);
     if (!existing) { res.status(404).json({ error: 'No TaxTrail connection saved yet', code: 'EIS_NOT_CONNECTED' }); return; }
     const check = await checkAndRecord(companyId, existing.base_url, decryptSecret(existing.api_key_enc));
+    if (check.ok) await requeueConfigErrors(companyId);
     res.json({ ...publicView(await loadConnection(companyId)), key_environment: check.environment, encryption_ready: true });
   } catch (error) {
     console.error('❌ testEisConnection error:', (error as Error).message);
