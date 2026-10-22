@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { depleteBatchesFIFO } from '../../services/fifoService';
 import { reserveOrNumber, addToGrandTotal } from '../../services/receiptCounterService';
+import { getInvoiceSeller } from '../../services/invoiceSellerService';
 
 // Create sale transaction
 async function createSale(req: Request, res: Response): Promise<void> {
@@ -274,8 +275,12 @@ async function createSale(req: Request, res: Response): Promise<void> {
 
     console.log('✅ Sale completed:', or_number);
 
+    // BIR seller details for the invoice (null → the app falls back to cached company/store data)
+    const seller = await getInvoiceSeller(supabase, companyId as string, store_id);
+
     res.status(201).json({
       sale: { ...sale, or_number, vatable_amount: vatableAmount, vat_exempt_amount: vatExemptAmount, zero_rated_amount: zeroRatedAmount, tax_amount: vatAmount },
+      seller,
       receipt_number,
       or_number,
       message: 'Sale completed successfully'
