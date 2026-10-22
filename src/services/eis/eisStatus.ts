@@ -114,7 +114,7 @@ export async function pollBirStatus(limit = 20): Promise<{ checked: number; upda
   const db = getDb();
   const since = new Date(Date.now() - POLL_MAX_AGE_DAYS * 86_400_000).toISOString();
   const { data, error } = await db.from('eis_invoices').select('id, company_id, esp_invoice_id, status_checked_at')
-    .eq('status', 'issued').gte('issued_at', since).order('status_checked_at', { ascending: true, nullsFirst: true }).limit(limit * 3);
+    .eq('status', 'issued').neq('kind', 'cancellation').gte('issued_at', since).order('status_checked_at', { ascending: true, nullsFirst: true }).limit(limit * 3);
   if (error) throw error;
 
   const conns = new Map<string, { baseUrl: string; apiKey: string; webhook: boolean } | null>();

@@ -156,3 +156,51 @@ export function mapSaleToTaxTrail(opts: {
     expectedEspTotal: expectedEspCents / 100,
   };
 }
+
+// ── Voids / returns → TaxTrail corrections (Invoicing plan P2-7) ──
+//  - void (whole sale, nothing returned before) → `cancellation`: no new document, the invoice is marked cancelled
+//  - return → `credit_memo`: its own document (sent to BIR), one line per returned item at the amount given back.
+//    TaxTrail copies buyer + SC/PWD beneficiary from the original; the lines are plain lines, so an SC/PWD sale's
+//    refund (already VAT-free) goes out as `exempt`, a non-VAT seller's as `exempt`, otherwise the item's own VAT type.
+export interface TindapoAdjustmentForEsp {
+  id: string;
+  adjustment_no: string;
+  kind: 'void' | 'return';
+  reason: string;
+  lines: Array<{ name: string; quantity: number; amount: number; vat_type?: string | null }>;
+}
+export interface TaxTrailCorrectionBody {
+  kind: 'cancellation' | 'credit_memo';
+  reason: string;
+  pricesIncludeVat?: boolean;
+  lines?: TaxTrailLine[];
+}
+
+export function mapAdjustmentToTaxTrail(opts: {
+  adjustment: TindapoAdjustmentForEsp;
+  vatStatus: VatStatus;
+  saleDiscountType?: string | null;
+}): { body: TaxTrailCorrectionBody; idempotencyKey: string; total: number } {
+  const { adjustment: a, vatStatus } = opts;
+  const reason = `${a.adjustment_no}: ${a.reason}`.slice(0, 500);
+  const idempotencyKey = `tindapo-adj-${a.id}`;
+  if (a.kind === 'void') return { body: { kind: 'cancellation', reason }, idempotencyKey, total: 0 };
+  if (!a.lines.length) throw new Error('Return has no items');
+
+  const special = opts.saleDiscountType === 'senior_citizen' || opts.saleDiscountType === 'pwd';
+  let totalC = 0;
+  const lines: TaxTrailLine[] = a.lines.filter((l) => toCents(l.amount) > 0).map((l) => {
+    const qtyStr = formatQuantity(l.quantity);
+    const qty4 = Math.round(parseFloat(qtyStr) * 10_000);
+    const amountC = toCents(l.amount);
+    // unit price rounded UP so quantity × price ≥ amount; the few centavos over go in `discount` → line total is exact
+    const unitC = Math.ceil((amountC * 10_000) / qty4);
+    const extended = divRound(qty4 * unitC, 10_000);
+    totalC += amountC;
+    let vatType = espVatType(l.vat_type, vatStatus);
+    if (special && vatType === 'vatable') vatType = 'exempt';
+    return { description: l.name.slice(0, 500), quantity: qtyStr, unit: 'pc', unitPrice: fmt(unitC), discount: fmt(extended - amountC), vatType };
+  });
+  if (!lines.length) throw new Error('Return amount is 0');
+  return { body: { kind: 'credit_memo', reason, pricesIncludeVat: vatStatus !== 'non_vat', lines }, idempotencyKey, total: totalC / 100 };
+}

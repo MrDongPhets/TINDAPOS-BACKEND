@@ -5,6 +5,8 @@
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { createBatch } from '../../services/fifoService';
+import { getAdjustmentEinvoices, queueAdjustmentCorrection } from '../../services/eis/eisIssuer';
+import { mapAdjustmentToTaxTrail } from '../../services/eis/taxtrailMapper';
 import { normalizeVatStatus, type ProductVatType } from '../../services/vatService';
 import {
   AdjustmentError, CORRECTION_CODES, formatAdjustmentNo, planAdjustment,
@@ -160,8 +162,25 @@ export async function createSaleAdjustment(req: Request, res: Response): Promise
       }
     }
 
+    // E-invoiced sale: the void / return also goes to TaxTrail (cancellation or credit memo) — P2-7
+    let einvoice = null;
+    try {
+      const vatStatus = normalizeVatStatus(companies?.[0]?.vat_status);
+      const mapped = mapAdjustmentToTaxTrail({
+        adjustment: {
+          id: adjustment.id, adjustment_no: adjustment.adjustment_no, kind, reason,
+          lines: plan.lines.map((l) => ({ name: l.name, quantity: l.quantity, amount: l.amount, vat_type: productMap.get(l.product_id)?.vat_type || 'vatable' })),
+        },
+        vatStatus,
+        saleDiscountType: sale.discount_type,
+      });
+      einvoice = await queueAdjustmentCorrection({
+        companyId, storeId: sale.store_id, saleId, adjustmentId: adjustment.id, body: mapped.body, idempotencyKey: mapped.idempotencyKey, total: mapped.total,
+      });
+    } catch (e) { console.error(`❌ E-invoice correction for ${adjustment.adjustment_no} not sent:`, e); }
+
     console.log(`✅ ${adjustment.adjustment_no}: ${kind} of ${sale.or_number} — ₱${plan.total_amount}`);
-    res.status(201).json({ adjustment, sale: { id: saleId, adjustment_status: plan.sale_status, refunded_amount: plan.refunded_after } });
+    res.status(201).json({ adjustment: { ...adjustment, einvoice }, sale: { id: saleId, adjustment_status: plan.sale_status, refunded_amount: plan.refunded_after } });
   } catch (error) {
     console.error('❌ Sale adjustment error:', error);
     res.status(500).json({ error: 'Failed to save the void / return', code: 'ADJUSTMENT_ERROR' });
@@ -172,5 +191,8 @@ export async function createSaleAdjustment(req: Request, res: Response): Promise
 export async function listSaleAdjustments(db: Db, saleId: string) {
   const { data, error } = await db.from('sale_adjustments').select('*').eq('original_sale_id', saleId).order('created_at', { ascending: true });
   if (error) return []; // table not created yet
-  return (data || []).map((a: { items: unknown }) => ({ ...a, items: typeof a.items === 'string' ? JSON.parse(a.items) : a.items }));
+  const einvoices = await getAdjustmentEinvoices((data || []).map((a: { id: string }) => a.id));
+  return (data || []).map((a: { id: string; items: unknown }) => ({
+    ...a, items: typeof a.items === 'string' ? JSON.parse(a.items) : a.items, einvoice: einvoices[a.id] || null,
+  }));
 }

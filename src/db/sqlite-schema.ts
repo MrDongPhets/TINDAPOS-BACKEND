@@ -547,6 +547,8 @@ export function initializeSQLiteSchema(db: Database.Database): void {
   try { db.exec('ALTER TABLE stores ADD COLUMN adj_counter INTEGER DEFAULT 0'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE sales ADD COLUMN adjustment_status TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE sales ADD COLUMN refunded_amount REAL DEFAULT 0'); } catch { /* already exists */ }
+  // Voids / returns → TaxTrail corrections (migrations/eis_corrections.sql)
+  try { db.exec('ALTER TABLE eis_invoices ADD COLUMN adjustment_id TEXT'); } catch { /* already exists */ }
 
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];

@@ -9,7 +9,7 @@ import { getDb } from '../../config/database';
 import { normalizeVatStatus } from '../vatService';
 import { decryptSecret } from './secretBox';
 import { espRequest, type EspResponse } from './taxtrailClient';
-import { mapSaleToTaxTrail, type TaxTrailIssueBody } from './taxtrailMapper';
+import { mapSaleToTaxTrail, type TaxTrailCorrectionBody, type TaxTrailIssueBody } from './taxtrailMapper';
 import { pollBirStatus } from './eisStatus';
 
 type Db = ReturnType<typeof getDb>;
@@ -29,7 +29,8 @@ export interface SaleEinvoiceView {
 }
 
 interface EisInvoiceRow {
-  id: string; company_id: string; sale_id: string; idempotency_key: string; request_body: TaxTrailIssueBody | string;
+  id: string; company_id: string; sale_id: string; idempotency_key: string; request_body: TaxTrailIssueBody | TaxTrailCorrectionBody | string;
+  kind?: 'invoice' | 'credit_memo' | 'cancellation' | 'additional_invoice'; adjustment_id?: string | null;
   status: EisInvoiceStatus; attempts: number; esp_invoice_no: string | null; issued_at: string | null; last_error: string | null;
 }
 
@@ -45,6 +46,7 @@ export function nextAttemptDelaySec(attempts: number, retryAfterSec?: number): n
 
 export type IssueOutcome =
   | { kind: 'issued'; invoice: EspInvoiceSummary }
+  | { kind: 'cancelled' }
   | { kind: 'retry'; error: string; retryAfterSec?: number }
   | { kind: 'invalid'; error: string }
   | { kind: 'config_error'; error: string };
@@ -64,6 +66,18 @@ export function classifyIssueResponse(res: EspResponse<{ invoice?: EspInvoiceSum
   const problems = (res.error?.details as { problems?: unknown[]; errors?: unknown[] } | undefined);
   const detail = problems?.problems ?? problems?.errors;
   return { kind: 'invalid', error: detail ? `${err} ${JSON.stringify(detail).slice(0, 500)}` : err };
+}
+
+// Corrections (P2-7): credit memo → the memo is a new document; cancellation → no document, just done.
+// A cancellation whose answer got lost and is resent comes back "This invoice is cancelled" → that's success.
+export function classifyCorrectionResponse(res: EspResponse<{ memo?: EspInvoiceSummary | null }>, kind: 'credit_memo' | 'cancellation'): IssueOutcome {
+  if (kind === 'cancellation') {
+    if (res.ok) return { kind: 'cancelled' };
+    if (res.status === 422 && res.error?.code === 'CORRECTION_NOT_ALLOWED' && /is cancelled/i.test(res.error.message)) return { kind: 'cancelled' };
+  } else if (res.ok) {
+    return res.data?.memo?.invoiceNo ? { kind: 'issued', invoice: res.data.memo } : { kind: 'retry', error: 'TaxTrail answered without a memo number' };
+  }
+  return classifyIssueResponse({ ...res, ok: false, data: null });
 }
 
 export function toEinvoiceView(row: Pick<EisInvoiceRow, 'status' | 'esp_invoice_no' | 'issued_at' | 'last_error'> | null | undefined): SaleEinvoiceView | null {
@@ -127,7 +141,9 @@ const nowIso = () => new Date().toISOString();
 async function recordOutcome(db: Db, row: EisInvoiceRow, outcome: IssueOutcome, httpStatus: number, expectedTotal?: number) {
   const attempts = row.attempts + 1;
   let patch: Record<string, unknown>;
-  if (outcome.kind === 'issued') {
+  if (outcome.kind === 'cancelled') {
+    patch = { status: 'issued', issued_at: nowIso(), status_changed_at: nowIso(), last_error: null };
+  } else if (outcome.kind === 'issued') {
     const espTotal = parseFloat(outcome.invoice.totalAmount);
     const mismatch = expectedTotal !== undefined && Math.abs(espTotal - expectedTotal) >= 0.005;
     if (mismatch) console.error(`⚠️ E-invoice ${outcome.invoice.invoiceNo} total ${espTotal} ≠ expected ${expectedTotal} (sale ${row.sale_id})`);
@@ -160,6 +176,19 @@ async function sendOnce(db: Db, row: EisInvoiceRow, timeoutMs: number, expectedT
     return recordOutcome(db, row, { kind: 'config_error', error: 'No working TaxTrail connection' }, 0);
   }
   const body = typeof row.request_body === 'string' ? JSON.parse(row.request_body) : row.request_body;
+  if (row.kind === 'credit_memo' || row.kind === 'cancellation') {
+    // A correction needs the original's TaxTrail id: wait while it is still being issued
+    const original = await getSaleEinvoiceRow(db, row.sale_id) as (EisInvoiceRow & { esp_invoice_id?: string | null }) | null;
+    if (!original || ['invalid', 'dead_letter'].includes(original.status)) {
+      return recordOutcome(db, row, { kind: 'invalid', error: 'The sale has no issued e-invoice to correct' }, 0);
+    }
+    if (!original.esp_invoice_id) return recordOutcome(db, row, { kind: 'retry', error: 'Waiting for the e-invoice of the sale to be issued first' }, 0);
+    const res = await espRequest<{ memo?: EspInvoiceSummary | null }>({
+      baseUrl: conn.baseUrl, apiKey: conn.apiKey, method: 'POST', path: `/v1/invoices/${encodeURIComponent(original.esp_invoice_id)}/corrections`,
+      body, idempotencyKey: row.idempotency_key, timeoutMs,
+    });
+    return recordOutcome(db, row, classifyCorrectionResponse(res, row.kind), res.status, expectedTotal);
+  }
   const res = await espRequest<{ invoice?: EspInvoiceSummary }>({
     baseUrl: conn.baseUrl, apiKey: conn.apiKey, method: 'POST', path: '/v1/invoices', body, idempotencyKey: row.idempotency_key, timeoutMs,
   });
@@ -210,6 +239,38 @@ export async function issueSaleEinvoice(saleId: string, opts: { timeoutMs?: numb
     console.error(`❌ E-invoice: unexpected error for sale ${saleId}:`, err);
     return { status: 'pending', invoice_no: null, issued_at: null, message: toEinvoiceView({ status: 'pending', esp_invoice_no: null, issued_at: null, last_error: null })!.message };
   }
+}
+
+/**
+ * Void / return of an e-invoiced sale (P2-7): queue the TaxTrail correction and try once.
+ * Only when the sale itself went to TaxTrail; never throws (the adjustment is already saved).
+ */
+export async function queueAdjustmentCorrection(opts: {
+  companyId: string; storeId: string; saleId: string; adjustmentId: string;
+  body: TaxTrailCorrectionBody; idempotencyKey: string; total: number; timeoutMs?: number;
+}): Promise<SaleEinvoiceView | null> {
+  const db = getDb();
+  try {
+    if (!(await getSaleEinvoiceRow(db, opts.saleId))) return null;
+    const { data: inserted, error } = await db.from('eis_invoices').insert({
+      company_id: opts.companyId, store_id: opts.storeId, sale_id: opts.saleId, adjustment_id: opts.adjustmentId,
+      kind: opts.body.kind, idempotency_key: opts.idempotencyKey, request_body: opts.body, status: 'pending', attempts: 0,
+    }).select().single();
+    if (error) { console.error(`❌ E-invoice correction for adjustment ${opts.adjustmentId} not queued:`, error); return null; }
+    return sendOnce(db, inserted as EisInvoiceRow, opts.timeoutMs ?? CHECKOUT_TIMEOUT_MS, opts.body.kind === 'credit_memo' ? opts.total : undefined);
+  } catch (err) {
+    console.error(`❌ E-invoice correction error for adjustment ${opts.adjustmentId}:`, err);
+    return null;
+  }
+}
+
+// TaxTrail status of each adjustment's correction (sale detail)
+export async function getAdjustmentEinvoices(adjustmentIds: string[]): Promise<Record<string, SaleEinvoiceView & { kind: string }>> {
+  if (!adjustmentIds.length) return {};
+  try {
+    const { data } = await getDb().from('eis_invoices').select('adjustment_id, kind, status, esp_invoice_no, issued_at, last_error').in('adjustment_id', adjustmentIds);
+    return Object.fromEntries((data || []).map((r: EisInvoiceRow & { kind: string }) => [r.adjustment_id, { ...toEinvoiceView(r)!, kind: r.kind }]));
+  } catch { return {}; }
 }
 
 async function getSaleEinvoiceRow(db: Db, saleId: string): Promise<EisInvoiceRow | null> {
