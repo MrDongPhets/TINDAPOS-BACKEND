@@ -1,6 +1,7 @@
 // src/controllers/admin/subscriptionsController.ts
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { birRecordsLock } from '../../services/birRecordsGuard';
 import { syncSubscription, expireSubscription, PLAN_CONFIG } from '../../services/subscriptionService';
 
 // List all companies with subscription info
@@ -268,6 +269,14 @@ async function permanentlyDeleteCompany(req: Request, res: Response): Promise<vo
     }
     if (confirm_name !== company.name) {
       res.status(400).json({ error: 'Company name does not match', code: 'CONFIRMATION_MISMATCH' });
+      return;
+    }
+
+    // BIR records (registered POS / e-invoices) are never wiped — P0-8
+    const lock = await birRecordsLock(id);
+    if (lock) {
+      console.warn(`🛑 Permanent delete refused for ${company.name} (${id}): BIR records`);
+      res.status(409).json({ error: lock, code: 'HAS_BIR_RECORDS' });
       return;
     }
 
