@@ -60,9 +60,9 @@ describe('validateStoreInput', () => {
     expect(r.errors).toEqual([])
     expect(r.update).toEqual({ branch_code: '00101', ptu_number: 'FP012345', min_number: null, msn_number: 'SN-1' })
   })
-  it('refuses e-invoice mode until it exists, and requires the store id', () => {
-    const r = validateStoreInput({ invoicing_mode: 'eis' }, 2)
+  it('accepts manual / eis modes (the TaxTrail connection is checked when saving), refuses others, requires the store id', () => {
+    expect(validateStoreInput({ id: 's', invoicing_mode: 'eis' }, 0)).toMatchObject({ errors: [], update: { invoicing_mode: 'eis' } })
+    const r = validateStoreInput({ invoicing_mode: 'paper' }, 2)
     expect(r.errors.map(e => e.field)).toEqual(['stores[2].id', 'stores[2].invoicing_mode'])
-    expect(r.errors[1].message).toMatch(/not available yet/)
   })
 })

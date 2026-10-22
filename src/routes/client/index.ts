@@ -4,6 +4,7 @@ import { getDb } from '../../config/database';
 import bcrypt from 'bcryptjs';
 import { updateGcashSettings } from '../../controllers/pos/gcashController';
 import { getBirSettings, updateBirSettings } from '../../controllers/client/birSettingsController';
+import { deleteEisConnection, getEisConnection, saveEisConnection, testEisConnection } from '../../controllers/client/eisConnectionController';
 
 import dashboardRoutes from './dashboard';
 import productsRoutes from './products';
@@ -166,6 +167,12 @@ router.put('/settings/gcash', updateGcashSettings);
 // GET/PUT /client/settings/bir — BIR registration (company TIN, VAT status) + per-store branch code and PTU/MIN/MSN
 router.get('/settings/bir', getBirSettings);
 router.put('/settings/bir', updateBirSettings);
+
+// E-invoicing provider (ITBS TaxTrail) connection — API key encrypted, never returned
+router.get('/settings/eis', getEisConnection);
+router.put('/settings/eis', saveEisConnection);
+router.post('/settings/eis/test', testEisConnection);
+router.delete('/settings/eis', deleteEisConnection);
 
 // PATCH /client/settings/biometric — toggle biometric clock-in (Laking Negosyo only)
 router.patch('/settings/biometric', requireAdvancedReports, async (req: Request, res: Response) => {

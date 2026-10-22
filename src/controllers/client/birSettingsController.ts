@@ -3,10 +3,11 @@
 // Lengths follow BIR's EIS e-invoice JSON format (Annex B v2.1). Owner only (client routes).
 import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
+import { hasWorkingEisConnection } from './eisConnectionController';
 
 export const VAT_STATUSES = ['vat', 'non_vat', 'rbe'] as const;
-// 'eis' needs the e-invoice pipeline (plan P2) — refuse it until that exists
-export const AVAILABLE_INVOICING_MODES = ['manual'] as const;
+// 'eis' = TaxTrail issues the invoice; allowed only with a working connection (checked when saving)
+export const AVAILABLE_INVOICING_MODES = ['manual', 'eis'] as const;
 
 type FieldError = { field: string; message: string };
 
@@ -79,7 +80,7 @@ export function validateStoreInput(body: StoreInput, index: number): { id: strin
   }
   if ('invoicing_mode' in body) {
     if ((AVAILABLE_INVOICING_MODES as readonly string[]).includes(String(body.invoicing_mode))) update.invoicing_mode = String(body.invoicing_mode);
-    else errors.push({ field: at('invoicing_mode'), message: body.invoicing_mode === 'eis' ? 'E-invoice mode is not available yet' : 'Invalid invoicing mode' });
+    else errors.push({ field: at('invoicing_mode'), message: 'Invalid invoicing mode' });
   }
   for (const [key, label] of [['ptu_number', 'PTU number'], ['min_number', 'MIN'], ['msn_number', 'Machine serial number']] as const) {
     if (!(key in body)) continue;
@@ -135,6 +136,12 @@ export async function updateBirSettings(req: Request, res: Response): Promise<vo
     const errors = [...company.errors, ...stores.flatMap((s) => s.errors)];
     if (errors.length) {
       res.status(400).json({ error: errors[0].message, code: 'VALIDATION_ERROR', details: errors });
+      return;
+    }
+
+    // E-invoice mode needs a TaxTrail connection that passed its last test
+    if (stores.some((s) => s.update.invoicing_mode === 'eis') && !(await hasWorkingEisConnection(companyId))) {
+      res.status(400).json({ error: 'Connect TaxTrail first (and pass the connection test) before switching a store to e-invoice', code: 'EIS_NOT_CONNECTED' });
       return;
     }
 
