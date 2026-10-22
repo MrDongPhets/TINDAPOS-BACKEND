@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { updateGcashSettings } from '../../controllers/pos/gcashController';
 import { getBirSettings, updateBirSettings } from '../../controllers/client/birSettingsController';
 import { deleteEisConnection, getEisConnection, saveEisConnection, testEisConnection } from '../../controllers/client/eisConnectionController';
+import { getEinvoices, retryEinvoiceHandler } from '../../controllers/client/einvoicesController';
 
 import dashboardRoutes from './dashboard';
 import productsRoutes from './products';
@@ -173,6 +174,8 @@ router.get('/settings/eis', getEisConnection);
 router.put('/settings/eis', saveEisConnection);
 router.post('/settings/eis/test', testEisConnection);
 router.delete('/settings/eis', deleteEisConnection);
+router.get('/einvoices', getEinvoices);                      // e-invoice status list (P2-8)
+router.post('/einvoices/:id/retry', retryEinvoiceHandler);   // resend now (same Idempotency-Key)
 
 // PATCH /client/settings/biometric — toggle biometric clock-in (Laking Negosyo only)
 router.patch('/settings/biometric', requireAdvancedReports, async (req: Request, res: Response) => {

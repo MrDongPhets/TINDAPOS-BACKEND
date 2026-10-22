@@ -84,7 +84,7 @@ export function toEinvoiceView(row: Pick<EisInvoiceRow, 'status' | 'esp_invoice_
   if (!row) return null;
   const message =
     row.status === 'pending' ? 'E-invoice pending — it will be issued automatically when TaxTrail answers'
-    : row.status === 'invalid' ? 'TaxTrail did not accept this sale. Check the e-invoice status in Sales.'
+    : row.status === 'invalid' ? 'TaxTrail did not accept this sale. See Settings → BIR & Invoicing → E-invoice status.'
     : row.status === 'config_error' ? 'TaxTrail refused the connection. Check Settings → BIR & Invoicing.'
     : row.status === 'dead_letter' ? 'E-invoice could not be issued after many tries. Contact support.'
     : row.status === 'rejected' ? 'BIR rejected this e-invoice. It needs a correction — contact support.'
@@ -311,6 +311,83 @@ export async function requeueConfigErrors(companyId: string): Promise<void> {
     .update({ status: 'pending', next_attempt_at: nowIso(), status_changed_at: nowIso(), updated_at: nowIso() })
     .eq('company_id', companyId).eq('status', 'config_error');
   if (error) console.error('❌ Could not requeue e-invoices after reconnect:', error);
+}
+
+// ── Owner's e-invoice status screen (Invoicing plan P2-8) ──
+// Needs a person: TaxTrail refused the data or the key, gave up after many tries, or BIR rejected it
+export const ATTENTION_STATUSES: EisInvoiceStatus[] = ['invalid', 'config_error', 'dead_letter', 'rejected'];
+
+export interface EinvoiceListItem {
+  id: string; kind: string; status: EisInvoiceStatus; sale_id: string; or_number: string | null; adjustment_no: string | null;
+  esp_invoice_no: string | null; attempts: number; last_error: string | null; rejection_code: string | null;
+  issued_at: string | null; created_at: string; next_attempt_at: string | null; message: string | null;
+}
+
+type ListRow = EisInvoiceRow & { adjustment_id: string | null; esp_invoice_no: string | null; rejection_code?: string | null; created_at: string; next_attempt_at: string | null };
+
+export async function listCompanyEinvoices(companyId: string, opts: { filter?: 'attention' | 'pending' | 'all'; limit?: number } = {}) {
+  const db = getDb();
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  let q = db.from('eis_invoices').select('*').eq('company_id', companyId);
+  if (opts.filter === 'attention') q = q.in('status', ATTENTION_STATUSES);
+  else if (opts.filter === 'pending') q = q.eq('status', 'pending');
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  const rows = (data || []) as ListRow[];
+
+  const saleIds = [...new Set(rows.map((r) => r.sale_id))];
+  const adjIds = rows.map((r) => r.adjustment_id).filter((x): x is string => !!x);
+  const [salesRes, adjsRes, allRes] = await Promise.all([
+    saleIds.length ? db.from('sales').select('id, or_number, receipt_number').in('id', saleIds) : Promise.resolve({ data: [] }),
+    adjIds.length ? db.from('sale_adjustments').select('id, adjustment_no').in('id', adjIds) : Promise.resolve({ data: [] }),
+    db.from('eis_invoices').select('status').eq('company_id', companyId),
+  ]);
+  const saleNo = new Map(((salesRes.data || []) as Array<{ id: string; or_number: string | null; receipt_number: string | null }>).map((s) => [s.id, s.or_number || s.receipt_number]));
+  const adjNo = new Map(((adjsRes.data || []) as Array<{ id: string; adjustment_no: string }>).map((a) => [a.id, a.adjustment_no]));
+  const counts: Record<string, number> = {};
+  for (const r of (allRes.data || []) as Array<{ status: string }>) counts[r.status] = (counts[r.status] || 0) + 1;
+
+  const items: EinvoiceListItem[] = rows.map((r) => ({
+    id: r.id, kind: r.kind ?? 'invoice', status: r.status, sale_id: r.sale_id, or_number: saleNo.get(r.sale_id) ?? null,
+    adjustment_no: r.adjustment_id ? adjNo.get(r.adjustment_id) ?? null : null,
+    esp_invoice_no: r.esp_invoice_no, attempts: r.attempts, last_error: r.last_error, rejection_code: r.rejection_code ?? null,
+    issued_at: r.issued_at, created_at: r.created_at, next_attempt_at: r.next_attempt_at,
+    message: toEinvoiceView(r)?.message ?? null,
+  }));
+  return { items, counts, attention: ATTENTION_STATUSES.reduce((n, s) => n + (counts[s] || 0), 0), pending: counts.pending || 0 };
+}
+
+export class RetryError extends Error { constructor(public code: string, message: string) { super(message); } }
+
+/**
+ * Owner pressed Retry: send once now (same Idempotency-Key, so never a duplicate).
+ * A refused sale (invalid) is rebuilt from the current data first, e.g. after fixing the branch code or a product.
+ * Issued / accepted rows and BIR rejections can't be retried (a rejection needs a correction).
+ */
+export async function retryEinvoice(companyId: string, id: string): Promise<SaleEinvoiceView | null> {
+  const db = getDb();
+  const { data } = await db.from('eis_invoices').select('*').eq('id', id).eq('company_id', companyId).limit(1);
+  const row = data?.[0] as EisInvoiceRow | undefined;
+  if (!row) throw new RetryError('NOT_FOUND', 'E-invoice not found');
+  if (row.status === 'issued' || row.status === 'accepted') throw new RetryError('ALREADY_ISSUED', 'This e-invoice is already issued');
+  if (row.status === 'rejected') throw new RetryError('BIR_REJECTED', 'BIR rejected this e-invoice. It needs a correction, not a resend. Contact support.');
+
+  const patch: Record<string, unknown> = { status: 'pending', next_attempt_at: nowIso(), updated_at: nowIso(), status_changed_at: nowIso() };
+  if (row.attempts >= MAX_ATTEMPTS - 1) patch.attempts = 0;
+  let expectedTotal: number | undefined;
+  if (row.status === 'invalid' && (row.kind ?? 'invoice') === 'invoice') {
+    try {
+      const built = await buildRequest(db, row.sale_id);
+      patch.request_body = built.mapped.body;
+      expectedTotal = built.mapped.expectedEspTotal;
+    } catch (e) {
+      throw new RetryError('STILL_INVALID', `This sale can't be sent yet: ${(e as Error).message}`);
+    }
+  }
+  const { data: claimed, error } = await db.from('eis_invoices').update(patch).eq('id', id).eq('status', row.status).select('*');
+  if (error) throw error;
+  if (!claimed?.length) throw new RetryError('CHANGED', 'This e-invoice changed just now. Refresh and try again.');
+  return sendOnce(db, claimed[0] as EisInvoiceRow, WORKER_TIMEOUT_MS, expectedTotal);
 }
 
 let workerTimer: NodeJS.Timeout | null = null;
