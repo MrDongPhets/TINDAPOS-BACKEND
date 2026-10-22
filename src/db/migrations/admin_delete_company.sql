@@ -33,6 +33,9 @@ BEGIN
   IF to_regclass('public.eis_invoices') IS NOT NULL THEN
     EXECUTE 'DELETE FROM eis_invoices WHERE company_id = $1 OR sale_id = ANY($2) OR store_id = ANY($3)' USING p_company_id, v_sale_ids, v_store_ids;
   END IF;
+  IF to_regclass('public.eis_webhook_events') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM eis_webhook_events WHERE company_id = $1' USING p_company_id;
+  END IF;
   IF to_regclass('public.eis_connections') IS NOT NULL THEN
     EXECUTE 'DELETE FROM eis_connections WHERE company_id = $1' USING p_company_id;
   END IF;

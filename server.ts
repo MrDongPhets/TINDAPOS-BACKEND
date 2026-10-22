@@ -43,7 +43,11 @@ app.use((req: Request, res: Response, next) => {
   }
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // TaxTrail webhooks are signed over the exact bytes received — keep them for the HMAC check
+  verify: (req, _res, buf) => { if (req.url?.startsWith('/eis/webhooks/')) (req as any).rawBody = buf.toString('utf8'); },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(requestLogger);
 app.use('/api/client/upload', uploadRoutes);

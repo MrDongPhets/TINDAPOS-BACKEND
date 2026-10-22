@@ -33,7 +33,7 @@ export function normalizeBaseUrl(input: unknown): { value: string; error?: strin
 export const API_KEY_PATTERN = /^sk_(test|live)_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 
 export async function espRequest<T>(opts: {
-  baseUrl: string; apiKey: string; method: 'GET' | 'POST'; path: string; body?: unknown; idempotencyKey?: string; timeoutMs?: number;
+  baseUrl: string; apiKey: string; method: 'GET' | 'POST' | 'DELETE'; path: string; body?: unknown; idempotencyKey?: string; timeoutMs?: number;
 }): Promise<EspResponse<T>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);

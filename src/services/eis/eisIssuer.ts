@@ -10,6 +10,7 @@ import { normalizeVatStatus } from '../vatService';
 import { decryptSecret } from './secretBox';
 import { espRequest, type EspResponse } from './taxtrailClient';
 import { mapSaleToTaxTrail, type TaxTrailIssueBody } from './taxtrailMapper';
+import { pollBirStatus } from './eisStatus';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -72,6 +73,7 @@ export function toEinvoiceView(row: Pick<EisInvoiceRow, 'status' | 'esp_invoice_
     : row.status === 'invalid' ? 'TaxTrail did not accept this sale. Check the e-invoice status in Sales.'
     : row.status === 'config_error' ? 'TaxTrail refused the connection. Check Settings → BIR & Invoicing.'
     : row.status === 'dead_letter' ? 'E-invoice could not be issued after many tries. Contact support.'
+    : row.status === 'rejected' ? 'BIR rejected this e-invoice. It needs a correction — contact support.'
     : null;
   return { status: row.status, invoice_no: row.esp_invoice_no, issued_at: row.issued_at, message };
 }
@@ -260,6 +262,9 @@ export function startEinvoiceWorker(intervalMs = 30_000): void {
     try {
       const r = await processDueEinvoices();
       if (r.processed) console.log(`🧾 E-invoice worker: ${r.issued}/${r.processed} issued`);
+      // BIR outcome for invoices without a webhook update yet (P2-6)
+      const p = await pollBirStatus();
+      if (p.updated) console.log(`🧾 E-invoice BIR status: ${p.updated}/${p.checked} updated`);
     } catch (err) {
       console.error('❌ E-invoice worker error:', (err as Error).message);
     } finally {

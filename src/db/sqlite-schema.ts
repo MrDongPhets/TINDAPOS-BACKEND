@@ -398,6 +398,12 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS eis_invoices_one_invoice_per_sale ON eis_invoices(sale_id) WHERE kind = 'invoice';
+    CREATE TABLE IF NOT EXISTS eis_webhook_events (
+      event_id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      received_at TEXT DEFAULT (datetime('now'))
+    );
 
     -- Staff WebAuthn Credentials
     CREATE TABLE IF NOT EXISTS staff_webauthn_credentials (
@@ -512,6 +518,11 @@ export function initializeSQLiteSchema(db: Database.Database): void {
   // Senior citizen / PWD beneficiary on the sale (same as migrations/sales_special_discount.sql)
   try { db.exec('ALTER TABLE sales ADD COLUMN sc_pwd_name TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE sales ADD COLUMN sc_pwd_id_no TEXT'); } catch { /* already exists */ }
+  // BIR status of e-invoices (migrations/eis_status.sql)
+  for (const col of ['esp_submission_id TEXT', 'bir_ack_no TEXT', 'rejection_code TEXT', 'rejection_class TEXT', 'last_event_seq INTEGER', 'status_checked_at TEXT']) {
+    try { db.exec(`ALTER TABLE eis_invoices ADD COLUMN ${col}`); } catch { /* already exists */ }
+  }
+  try { db.exec('ALTER TABLE eis_connections ADD COLUMN webhook_id TEXT'); } catch { /* already exists */ }
 
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];

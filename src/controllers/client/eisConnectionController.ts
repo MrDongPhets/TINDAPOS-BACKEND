@@ -5,11 +5,13 @@ import { Request, Response } from 'express';
 import { getDb } from '../../config/database';
 import { decryptSecret, encryptionConfigured, encryptSecret } from '../../services/eis/secretBox';
 import { requeueConfigErrors } from '../../services/eis/eisIssuer';
+import { registerWebhook, unregisterWebhook } from '../../services/eis/eisStatus';
 import { API_KEY_PATTERN, describeWhoAmI, normalizeBaseUrl, whoami } from '../../services/eis/taxtrailClient';
 
 type ConnectionRow = {
   base_url: string; api_key_enc: string; api_key_last4: string | null;
   last_checked_at: string | null; last_check_ok: boolean | number | null; last_check_message: string | null;
+  webhook_id?: string | null;
 };
 
 const publicView = (row: ConnectionRow | null) => row
@@ -22,12 +24,14 @@ const publicView = (row: ConnectionRow | null) => row
       last_checked_at: row.last_checked_at,
       last_check_ok: row.last_check_ok === true || row.last_check_ok === 1,
       last_check_message: row.last_check_message,
+      // BIR status updates: instant through the TaxTrail webhook, otherwise polled every few minutes
+      status_updates: row.webhook_id ? 'webhook' : 'polling',
     }
   : { connected: false };
 
 async function loadConnection(companyId: string): Promise<ConnectionRow | null> {
   const { data, error } = await getDb().from('eis_connections')
-    .select('base_url, api_key_enc, api_key_last4, last_checked_at, last_check_ok, last_check_message')
+    .select('base_url, api_key_enc, api_key_last4, last_checked_at, last_check_ok, last_check_message, webhook_id')
     .eq('company_id', companyId).limit(1);
   if (error) throw error;
   return (data?.[0] as ConnectionRow | undefined) || null;
@@ -96,7 +100,13 @@ export async function saveEisConnection(req: Request, res: Response): Promise<vo
     if (error) throw error;
 
     const check = await checkAndRecord(companyId, url.value, apiKey);
-    if (check.ok) await requeueConfigErrors(companyId);
+    if (check.ok) {
+      await requeueConfigErrors(companyId);
+      if (newKey || !existing?.webhook_id || existing.base_url !== url.value) {
+        const hook = await registerWebhook(companyId, url.value, apiKey);
+        console.log(`🔔 ${hook.message}`);
+      }
+    }
     console.log(`🔌 E-invoicing connection saved for company ${companyId}: ${check.ok ? 'OK' : 'not ready'}`);
     res.json({ ...publicView(await loadConnection(companyId)), key_environment: check.environment, encryption_ready: true });
   } catch (error) {
@@ -125,6 +135,10 @@ export async function deleteEisConnection(req: Request, res: Response): Promise<
   try {
     const companyId = req.user!.company_id as string;
     const db = getDb();
+    const existing = await loadConnection(companyId);
+    if (existing?.webhook_id) {
+      try { await unregisterWebhook(companyId, existing.base_url, decryptSecret(existing.api_key_enc)); } catch { /* removed below anyway */ }
+    }
     const { error: storeErr } = await db.from('stores').update({ invoicing_mode: 'manual', updated_at: new Date().toISOString() }).eq('company_id', companyId);
     if (storeErr) throw storeErr;
     const { error } = await db.from('eis_connections').delete().eq('company_id', companyId);

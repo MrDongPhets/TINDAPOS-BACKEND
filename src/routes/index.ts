@@ -12,6 +12,7 @@ import reportsRoutes from './reports/index';
 import setupRoutes from './setup';
 import billingRoutes from './billing/index';
 import eisTestRoutes from './eis/index';
+import { receiveTaxTrailWebhook } from '../controllers/eis/eisWebhookController';
 
 const router = express.Router();
 
@@ -86,6 +87,7 @@ router.use('/client', clientRoutes);
 router.use('/pos', posRoutes);
 router.use('/staff', staffRoutes);
 router.use('/reports', reportsRoutes);
+router.post('/eis/webhooks/taxtrail/:companyId', receiveTaxTrailWebhook); // BIR status from TaxTrail (HMAC-signed, no login)
 router.use('/eis-test', eisTestRoutes); // EIS integration test API — off unless EIS_TEST_API_KEY is set
 
 export default router;
