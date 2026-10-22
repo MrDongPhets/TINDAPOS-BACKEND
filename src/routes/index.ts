@@ -11,6 +11,7 @@ import staffRoutes from './staff/index';
 import reportsRoutes from './reports/index';
 import setupRoutes from './setup';
 import billingRoutes from './billing/index';
+import eisTestRoutes from './eis/index';
 
 const router = express.Router();
 
@@ -85,5 +86,6 @@ router.use('/client', clientRoutes);
 router.use('/pos', posRoutes);
 router.use('/staff', staffRoutes);
 router.use('/reports', reportsRoutes);
+router.use('/eis-test', eisTestRoutes); // EIS integration test API — off unless EIS_TEST_API_KEY is set
 
 export default router;
