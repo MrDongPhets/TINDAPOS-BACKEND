@@ -45,8 +45,25 @@ export function computeSaleVat(opts: {
   };
 }
 
-// SC/PWD discount on a VAT-inclusive subtotal: remove VAT, then 20% off (VAT sellers);
-// non-VAT sellers have no VAT in their prices, so it's simply 20% off
-export function scPwdDiscount(subtotal: number, vatStatus: VatStatus): number {
-  return vatStatus === 'non_vat' ? r2(subtotal * 0.2) : r2(subtotal - (subtotal / 1.12) * 0.8);
+// Senior citizen / PWD discount, item by item (RA 9994 / RA 7277) — same rule and rounding as TaxTrail's
+// applySpecialDiscount, so a Tindapo sale and the e-invoice TaxTrail issues for it come to the same total:
+//  - VATable item (VAT seller): VAT taken out of the price first (price × 100/112), then the rate off
+//  - VAT-exempt / zero-rated item, or any item of a non-VAT seller: the rate off the price as is
+// All math in centavos, rounded half away from zero per line. Line discounts are replaced by the special discount.
+export interface SpecialDiscountLine { price: number; quantity: number; vatType: ProductVatType }
+
+const divRound = (n: number, d: number) => Math.floor((n * 2 + d) / (2 * d));
+
+export function specialDiscountTotals(lines: SpecialDiscountLine[], vatStatus: VatStatus, ratePercent = 20) {
+  let grossC = 0;
+  let totalC = 0;
+  for (const l of lines) {
+    const qty4 = Math.round(l.quantity * 10_000);
+    const priceC = Math.round(l.price * 100);
+    grossC += divRound(qty4 * priceC, 10_000);
+    const base = l.vatType === 'vatable' && vatStatus !== 'non_vat' ? divRound(priceC * 100, 112) : priceC;
+    const extended = divRound(qty4 * base, 10_000);
+    totalC += extended - divRound(extended * ratePercent, 100);
+  }
+  return { gross: grossC / 100, discount: (grossC - totalC) / 100, total: totalC / 100 };
 }

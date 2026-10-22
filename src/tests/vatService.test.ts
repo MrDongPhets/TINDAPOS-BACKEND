@@ -1,7 +1,8 @@
 /**
  * VAT by the company's BIR status (src/services/vatService.ts) — Invoicing plan P0-5
  */
-import { computeSaleVat, normalizeVatStatus, scPwdDiscount } from '../services/vatService'
+import { computeSaleVat, normalizeVatStatus, specialDiscountTotals } from '../services/vatService'
+import { mapSaleToTaxTrail } from '../services/eis/taxtrailMapper'
 
 const items = [
   { total: 112, vatType: 'vatable' as const },
@@ -31,12 +32,32 @@ describe('computeSaleVat', () => {
   })
 })
 
-describe('scPwdDiscount', () => {
-  it('VAT store: remove VAT, then 20% off (₱112 → pay ₱80, discount ₱32)', () => {
-    expect(scPwdDiscount(112, 'vat')).toBe(32)
+describe('specialDiscountTotals (senior citizen / PWD, per item)', () => {
+  it('VAT store, VATable items: ₱112 → pay ₱80', () => {
+    expect(specialDiscountTotals([{ price: 56, quantity: 2, vatType: 'vatable' }], 'vat')).toEqual({ gross: 112, discount: 32, total: 80 })
   })
-  it('non-VAT store: simply 20% off (₱112 → discount ₱22.40)', () => {
-    expect(scPwdDiscount(112, 'non_vat')).toBe(22.4)
+  it('VAT store with a VAT-exempt item: VAT is NOT removed from the rice (the bug P2-2 found)', () => {
+    const t = specialDiscountTotals([{ price: 112, quantity: 1, vatType: 'vatable' }, { price: 100, quantity: 1, vatType: 'vat_exempt' }], 'vat')
+    expect(t).toEqual({ gross: 212, discount: 52, total: 160 })   // old whole-total rule charged ₱151.43
+  })
+  it('non-VAT store: simply 20% off every item', () => {
+    expect(specialDiscountTotals([{ price: 20, quantity: 2, vatType: 'vatable' }], 'non_vat')).toEqual({ gross: 40, discount: 8, total: 32 })
+  })
+  it('always lands on the same total TaxTrail computes for the e-invoice', () => {
+    const cases: Array<{ items: Array<{ price: number; quantity: number; vatType: 'vatable' | 'vat_exempt' | 'zero_rated' }>; vat: 'vat' | 'non_vat' }> = [
+      { items: [{ price: 9.99, quantity: 3, vatType: 'vatable' }, { price: 0.75, quantity: 7, vatType: 'vatable' }], vat: 'vat' },
+      { items: [{ price: 112, quantity: 1, vatType: 'vatable' }, { price: 50, quantity: 2, vatType: 'vat_exempt' }, { price: 33.33, quantity: 3, vatType: 'zero_rated' }], vat: 'vat' },
+      { items: [{ price: 17.5, quantity: 1.25, vatType: 'vatable' }], vat: 'non_vat' },
+    ]
+    for (const c of cases) {
+      const ours = specialDiscountTotals(c.items, c.vat)
+      const esp = mapSaleToTaxTrail({
+        sale: { id: 'x', discount_type: 'senior_citizen', total_amount: ours.total }, vatStatus: c.vat, branchCode: '00000',
+        items: c.items.map((i, n) => ({ name: 'Item ' + n, quantity: i.quantity, unit_price: i.price, vat_type: i.vatType })),
+        beneficiary: { name: 'Juan Dela Cruz', idNumber: 'OSCA-1' },
+      })
+      expect(esp.expectedEspTotal).toBe(ours.total)
+    }
   })
 })
 

@@ -5,6 +5,19 @@ import { reserveOrNumber, addToGrandTotal } from '../../services/receiptCounterS
 import { getInvoiceSeller } from '../../services/invoiceSellerService';
 import { computeSaleVat, normalizeVatStatus, type ProductVatType } from '../../services/vatService';
 
+// SC/PWD beneficiary: same ID characters TaxTrail accepts (letters, digits, dashes, slashes, spaces)
+const BENEFICIARY_ID = /^[A-Za-z0-9-/ ]{3,50}$/;
+export function specialDiscountBeneficiary(discountType: unknown, name: unknown, idNumber: unknown): { required: boolean; value: { name: string; idNumber: string } | null; error?: string } {
+  const required = discountType === 'senior_citizen' || discountType === 'pwd';
+  if (!required) return { required, value: null };
+  const n = typeof name === 'string' ? name.trim() : '';
+  const id = typeof idNumber === 'string' ? idNumber.trim() : '';
+  if (!n && !id) return { required, value: null };
+  if (n.length < 2 || n.length > 200) return { required, value: null, error: 'Enter the name as printed on the senior citizen / PWD ID' };
+  if (!BENEFICIARY_ID.test(id)) return { required, value: null, error: 'Enter the senior citizen / PWD ID number as printed on the card' };
+  return { required, value: { name: n, idNumber: id } };
+}
+
 // Create sale transaction
 async function createSale(req: Request, res: Response): Promise<void> {
   try {
@@ -19,7 +32,9 @@ async function createSale(req: Request, res: Response): Promise<void> {
       customer_name,
       customer_phone,
       customer_id,
-      notes
+      notes,
+      sc_pwd_name,
+      sc_pwd_id_no
     } = req.body;
 
     const companyId = req.user!.company_id;
@@ -47,10 +62,22 @@ async function createSale(req: Request, res: Response): Promise<void> {
 
     // Product VAT types + the company's BIR VAT status (non-VAT stores record no VAT)
     const productIds = (items as Array<{ product_id: string }>).map(i => i.product_id);
-    const [{ data: productVatData }, { data: companyVat }] = await Promise.all([
+    const [{ data: productVatData }, { data: companyVat }, { data: storeRows }] = await Promise.all([
       supabase.from('products').select('id, vat_type').in('id', productIds),
       supabase.from('companies').select('vat_status').eq('id', companyId).limit(1),
+      supabase.from('stores').select('invoicing_mode').eq('id', store_id).eq('company_id', companyId).limit(1),
     ]);
+
+    // Senior citizen / PWD beneficiary (printed on the invoice; required to issue an e-invoice through TaxTrail)
+    const beneficiary = specialDiscountBeneficiary(discount_type, sc_pwd_name, sc_pwd_id_no);
+    if (beneficiary.error) {
+      res.status(400).json({ error: beneficiary.error, code: 'SC_PWD_DETAILS_INVALID' });
+      return;
+    }
+    if (beneficiary.required && storeRows?.[0]?.invoicing_mode === 'eis' && !beneficiary.value) {
+      res.status(400).json({ error: 'Senior citizen / PWD sale: enter the name and ID number (needed for the e-invoice)', code: 'SC_PWD_DETAILS_REQUIRED' });
+      return;
+    }
     const vatStatus = normalizeVatStatus(companyVat?.[0]?.vat_status);
     const vatTypeMap = new Map((productVatData || []).map((p: { id: string; vat_type: string }) => [p.id, p.vat_type || 'vatable']));
 
@@ -74,9 +101,7 @@ async function createSale(req: Request, res: Response): Promise<void> {
     console.log('📝 Creating sale record...', or_number);
 
     // Start transaction - Create sale
-    const { data: sale, error: saleError } = await supabase
-      .from('sales')
-      .insert({
+    const saleRow: Record<string, unknown> = {
         company_id: companyId,
         store_id,
         staff_id: isStaff ? userId : null,
@@ -95,10 +120,16 @@ async function createSale(req: Request, res: Response): Promise<void> {
         zero_rated_amount: parseFloat(zeroRatedAmount.toFixed(2)),
         items_count: (items as Array<{ quantity: number }>).reduce((sum, item) => sum + item.quantity, 0),
         notes: notes || null,
-        created_by: isStaff ? null : userId
-      })
-      .select()
-      .single();
+        created_by: isStaff ? null : userId,
+        ...(beneficiary.value ? { sc_pwd_name: beneficiary.value.name, sc_pwd_id_no: beneficiary.value.idNumber } : {})
+    };
+    let { data: sale, error: saleError } = await supabase.from('sales').insert(saleRow).select().single();
+    // sales_special_discount.sql not run yet → save the sale without the beneficiary rather than fail the checkout
+    if (saleError && beneficiary.value && /sc_pwd_/.test(String((saleError as { message?: string }).message))) {
+      console.warn('⚠️ sales.sc_pwd_* columns missing — run sales_special_discount.sql. Saving the sale without the beneficiary.');
+      const { sc_pwd_name: _n, sc_pwd_id_no: _i, ...withoutBeneficiary } = saleRow;
+      ({ data: sale, error: saleError } = await supabase.from('sales').insert(withoutBeneficiary).select().single());
+    }
 
     if (saleError) {
       // The reserved OR number is now unused — log it so the gap in the sequence is traceable

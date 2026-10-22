@@ -509,6 +509,9 @@ export function initializeSQLiteSchema(db: Database.Database): void {
   try { db.exec('ALTER TABLE stores ADD COLUMN ptu_number TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE stores ADD COLUMN min_number TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE stores ADD COLUMN msn_number TEXT'); } catch { /* already exists */ }
+  // Senior citizen / PWD beneficiary on the sale (same as migrations/sales_special_discount.sql)
+  try { db.exec('ALTER TABLE sales ADD COLUMN sc_pwd_name TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE sales ADD COLUMN sc_pwd_id_no TEXT'); } catch { /* already exists */ }
 
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];
