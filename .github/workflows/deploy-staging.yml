@@ -1,0 +1,66 @@
+# STAGING: build feat/invoicing on GitHub, ship it to /home/deploy/tindapo-staging on the same droplet,
+# reload PM2 app "tindapo-staging" (port 3002 → https://staging-api.tindapo.com). Live (main, port 3001) is untouched.
+# Uses the same secrets as deploy.yml: DROPLET_HOST, DROPLET_SSH_KEY.
+# One-time server setup (folder, .env, Nginx, SSL) must be done first — see ecosystem.staging.config.js.
+name: Deploy STAGING
+
+on:
+  push:
+    branches: [feat/invoicing]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install, test & build
+        run: |
+          npm ci
+          npx jest --silent
+          npm run build
+
+      - name: Package release
+        run: tar czf staging.tgz dist package.json package-lock.json ecosystem.staging.config.js
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DROPLET_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload & restart
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DROPLET_HOST }}"
+          scp -i ~/.ssh/deploy_key staging.tgz deploy@${{ secrets.DROPLET_HOST }}:/home/deploy/staging.tgz
+          $SSH 'set -e
+            cd /home/deploy/tindapo-staging
+            test -f .env || { echo "❌ /home/deploy/tindapo-staging/.env missing — do the one-time setup"; exit 1; }
+            rm -rf dist
+            tar xzf /home/deploy/staging.tgz
+            mkdir -p logs
+            npm ci --omit=dev --no-audit --no-fund
+            pm2 startOrReload ecosystem.staging.config.js --update-env
+            pm2 save
+            rm -f /home/deploy/staging.tgz'
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DROPLET_HOST }} 'curl -fs http://127.0.0.1:3002/health'; then
+              echo "✅ Staging healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Staging health check failed"; exit 1
