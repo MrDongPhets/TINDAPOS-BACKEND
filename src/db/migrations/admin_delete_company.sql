@@ -29,6 +29,10 @@ BEGIN
 
   -- Sales + credit
   DELETE FROM credit_ledger WHERE company_id = p_company_id OR sale_id = ANY(v_sale_ids);
+  -- Voids / returns (sale_adjustments.sql). Guarded so this works before that migration is run.
+  IF to_regclass('public.sale_adjustments') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM sale_adjustments WHERE company_id = $1 OR original_sale_id = ANY($2) OR store_id = ANY($3)' USING p_company_id, v_sale_ids, v_store_ids;
+  END IF;
   -- E-invoice links + ESP connection (eis_invoices.sql). Guarded so this works before that migration is run.
   IF to_regclass('public.eis_invoices') IS NOT NULL THEN
     EXECUTE 'DELETE FROM eis_invoices WHERE company_id = $1 OR sale_id = ANY($2) OR store_id = ANY($3)' USING p_company_id, v_sale_ids, v_store_ids;

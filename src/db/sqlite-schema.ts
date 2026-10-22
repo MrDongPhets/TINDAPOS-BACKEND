@@ -398,6 +398,26 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS eis_invoices_one_invoice_per_sale ON eis_invoices(sale_id) WHERE kind = 'invoice';
+    -- Voids / returns (same as migrations/sale_adjustments.sql)
+    CREATE TABLE IF NOT EXISTS sale_adjustments (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      company_id TEXT NOT NULL,
+      store_id TEXT NOT NULL,
+      original_sale_id TEXT NOT NULL,
+      adjustment_no TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('void', 'return')),
+      correction_code TEXT NOT NULL CHECK (correction_code IN ('01', '04', '05', '09')),
+      total_amount REAL NOT NULL,
+      vatable_amount REAL NOT NULL DEFAULT 0,
+      vat_exempt_amount REAL NOT NULL DEFAULT 0,
+      zero_rated_amount REAL NOT NULL DEFAULT 0,
+      tax_amount REAL NOT NULL DEFAULT 0,
+      items TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_by TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS sale_adjustments_store_no_uidx ON sale_adjustments(store_id, adjustment_no);
     CREATE TABLE IF NOT EXISTS eis_webhook_events (
       event_id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL,
@@ -523,6 +543,10 @@ export function initializeSQLiteSchema(db: Database.Database): void {
     try { db.exec(`ALTER TABLE eis_invoices ADD COLUMN ${col}`); } catch { /* already exists */ }
   }
   try { db.exec('ALTER TABLE eis_connections ADD COLUMN webhook_id TEXT'); } catch { /* already exists */ }
+  // Voids / returns (migrations/sale_adjustments.sql)
+  try { db.exec('ALTER TABLE stores ADD COLUMN adj_counter INTEGER DEFAULT 0'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE sales ADD COLUMN adjustment_status TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE sales ADD COLUMN refunded_amount REAL DEFAULT 0'); } catch { /* already exists */ }
 
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];

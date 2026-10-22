@@ -2,6 +2,7 @@
 import { Request, Response } from 'express';
 import { getInvoiceSeller } from '../../services/invoiceSellerService';
 import { getSaleEinvoice } from '../../services/eis/eisIssuer';
+import { listSaleAdjustments } from './saleAdjustmentsController';
 import { getDb } from '../../config/database';
 
 // Get all sales with filters and pagination
@@ -175,6 +176,7 @@ async function getSaleDetails(req: Request, res: Response): Promise<void> {
     // BIR seller details for reprinting the invoice
     const seller = await getInvoiceSeller(supabase, companyId as string, sale.store_id);
     const einvoice = await getSaleEinvoice(sale.id);
+    const adjustments = await listSaleAdjustments(supabase, sale.id);
 
     res.json({
       sale: {
@@ -183,6 +185,7 @@ async function getSaleDetails(req: Request, res: Response): Promise<void> {
       },
       seller,
       einvoice,
+      adjustments,
       timestamp: new Date().toISOString()
     });
 
@@ -293,65 +296,6 @@ async function getSalesSummary(req: Request, res: Response): Promise<void> {
     res.status(500).json({
       error: 'Failed to fetch sales summary',
       code: 'SALES_SUMMARY_ERROR'
-    });
-  }
-}
-
-// Void/Cancel a sale (soft delete or mark as cancelled)
-async function voidSale(req: Request, res: Response): Promise<void> {
-  try {
-    const { id } = req.params;
-    const { reason } = req.body;
-    const companyId = req.user!.company_id;
-    const userId = req.user!.id;
-    const supabase = getDb();
-
-    console.log('🚫 Voiding sale:', id);
-
-    // Get sale details first
-    const { data: sale, error: saleError } = await supabase
-      .from('sales')
-      .select('*, sales_items(*)')
-      .eq('id', id)
-      .eq('company_id', companyId)
-      .single();
-
-    if (saleError || !sale) {
-      res.status(404).json({
-        error: 'Sale not found',
-        code: 'SALE_NOT_FOUND'
-      });
-      return;
-    }
-
-    // For now, just add a note (you can add a status column later)
-    const voidNote = `VOIDED: ${reason || 'No reason provided'} - By user ${userId} at ${new Date().toISOString()}`;
-
-    const { error: updateError } = await supabase
-      .from('sales')
-      .update({
-        notes: sale.notes ? `${sale.notes}\n${voidNote}` : voidNote
-      })
-      .eq('id', id);
-
-    if (updateError) throw updateError;
-
-    // Optionally restore inventory
-    // (You can implement this based on your business logic)
-
-    console.log('✅ Sale voided');
-
-    res.json({
-      message: 'Sale voided successfully',
-      sale_id: id,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Void sale error:', error);
-    res.status(500).json({
-      error: 'Failed to void sale',
-      code: 'VOID_SALE_ERROR'
     });
   }
 }
@@ -477,7 +421,6 @@ export {
   getAllSales,
   getSaleDetails,
   getSalesSummary,
-  voidSale,
   getRecentSales,
   exportSales
 };

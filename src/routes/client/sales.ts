@@ -4,10 +4,10 @@ import {
   getAllSales,
   getSaleDetails,
   getSalesSummary,
-  voidSale,
   getRecentSales,
   exportSales
 } from '../../controllers/client/salesController';
+import { createSaleAdjustment } from '../../controllers/client/saleAdjustmentsController';
 
 const router = express.Router();
 
@@ -26,7 +26,9 @@ router.get('/export', exportSales);
 // GET /client/sales/:id - Get sale details with items
 router.get('/:id', getSaleDetails);
 
-// POST /client/sales/:id/void - Void/cancel a sale
-router.post('/:id/void', voidSale);
+// POST /client/sales/:id/adjustments - void or return (its own ADJ-… document; stock back; grand total untouched)
+router.post('/:id/adjustments', createSaleAdjustment);
+// POST /client/sales/:id/void - void the whole sale (same as kind 'void')
+router.post('/:id/void', createSaleAdjustment);
 
 export default router;
