@@ -3,6 +3,7 @@ import { authenticateToken, requireClient, requireActiveSubscription, requireAdv
 import { getDb } from '../../config/database';
 import bcrypt from 'bcryptjs';
 import { updateGcashSettings } from '../../controllers/pos/gcashController';
+import { getBirSettings, updateBirSettings } from '../../controllers/client/birSettingsController';
 
 import dashboardRoutes from './dashboard';
 import productsRoutes from './products';
@@ -161,6 +162,10 @@ router.put('/settings/receipt', async (req: Request, res: Response) => {
 
 // PUT /client/settings/gcash — GCash cash-in/cash-out fee rules
 router.put('/settings/gcash', updateGcashSettings);
+
+// GET/PUT /client/settings/bir — BIR registration (company TIN, VAT status) + per-store branch code and PTU/MIN/MSN
+router.get('/settings/bir', getBirSettings);
+router.put('/settings/bir', updateBirSettings);
 
 // PATCH /client/settings/biometric — toggle biometric clock-in (Laking Negosyo only)
 router.patch('/settings/biometric', requireAdvancedReports, async (req: Request, res: Response) => {

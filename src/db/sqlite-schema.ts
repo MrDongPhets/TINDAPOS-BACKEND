@@ -498,6 +498,18 @@ export function initializeSQLiteSchema(db: Database.Database): void {
   try { db.exec('ALTER TABLE sales ADD COLUMN customer_id TEXT'); } catch { /* already exists */ }
   try { db.exec('ALTER TABLE users ADD COLUMN phone TEXT'); } catch { /* already exists */ }
 
+  // BIR registration + invoicing mode (same columns as migrations/bir_registration.sql; checks enforced in the API)
+  try { db.exec('ALTER TABLE companies ADD COLUMN bir_registered_name TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE companies ADD COLUMN bir_trade_name TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE companies ADD COLUMN bir_registered_address TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE companies ADD COLUMN tin TEXT'); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE companies ADD COLUMN vat_status TEXT NOT NULL DEFAULT 'vat'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE stores ADD COLUMN branch_code TEXT NOT NULL DEFAULT '00000'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE stores ADD COLUMN invoicing_mode TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE stores ADD COLUMN ptu_number TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE stores ADD COLUMN min_number TEXT'); } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE stores ADD COLUMN msn_number TEXT'); } catch { /* already exists */ }
+
   // Set trial_end_date for existing companies that don't have one (30 days from now)
   const companiesWithoutTrial = db.prepare("SELECT id FROM companies WHERE trial_end_date IS NULL AND subscription_status = 'trial'").all() as { id: string }[];
   const defaultTrialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();

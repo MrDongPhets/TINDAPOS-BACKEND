@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EIS Test Invoices</title>
+<!-- Template for scripts/eis-test-invoices.ts — the script embeds the generated data and writes output/viewer.html -->
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1f2430; --muted: #6b7280; --line: #e5e7eb;
+    --ok: #15803d; --ok-bg: #dcfce7; --bad: #b91c1c; --bad-bg: #fee2e2; --accent: #E8302A; --code: #0f172a;
+    --k: #1d4ed8; --s: #047857; --n: #b45309; --l: #7c3aed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --panel: #171a21; --ink: #e6e8ee; --muted: #9aa3b2; --line: #2a2f3a;
+      --ok: #4ade80; --ok-bg: #14321f; --bad: #f87171; --bad-bg: #3a1717; --code: #0b0d12;
+      --k: #93c5fd; --s: #6ee7b7; --n: #fcd34d; --l: #c4b5fd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+  header h1 { margin: 0; font-size: 18px; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  .warn { color: var(--bad); font-size: 12px; font-weight: 600; }
+  main { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 60px); }
+  nav { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; max-height: calc(100vh - 60px); position: sticky; top: 0; }
+  nav h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 16px 6px; }
+  nav button { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; padding: 8px 16px; cursor: pointer; font: inherit; border-left: 3px solid transparent; }
+  nav button:hover { background: var(--bg); }
+  nav button[aria-current="true"] { background: var(--bg); border-left-color: var(--accent); font-weight: 600; }
+  nav .file { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  nav .title { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+  section { padding: 20px; min-width: 0; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.bad { background: var(--bad-bg); color: var(--bad); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .expect { color: var(--muted); margin: 4px 0 0; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat { min-width: 0; }
+  .stat b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .table-wrap { overflow-x: auto; }
+  .json-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
+  .json-head button { border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  pre { margin: 0; background: var(--code); color: #e5e7eb; border-radius: 8px; padding: 14px; overflow: auto; max-height: 70vh; font: 12.5px/1.5 ui-monospace, Consolas, monospace; }
+  pre .k { color: #93c5fd; } pre .s { color: #86efac; } pre .n { color: #fcd34d; } pre .l { color: #c4b5fd; }
+  .muted { color: var(--muted); }
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; }
+    nav { position: static; max-height: 260px; border-right: 0; border-bottom: 1px solid var(--line); }
+    section { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>EIS Test Invoices</h1>
+  <span class="meta" id="meta"></span>
+  <span class="warn">TEST DATA ONLY: fake TINs, not for BIR production</span>
+</header>
+<main>
+  <nav id="list" aria-label="Test cases"></nav>
+  <section id="detail"></section>
+</main>
+<script>
+const DATA = /*__EIS_DATA__*/null;
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const peso = (n) => typeof n === 'number' ? '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+// Tokenize the raw JSON first, then escape each piece (escaping first would hide the quotes from the regex)
+function highlight(json) {
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let out = '';
+  let last = 0;
+  for (const m of json.matchAll(re)) {
+    out += esc(json.slice(last, m.index));
+    const [, str, colon, lit, num] = m;
+    if (str) out += colon ? `<span class="k">${esc(str)}</span>${colon}` : `<span class="s">${esc(str)}</span>`;
+    else if (lit) out += `<span class="l">${lit}</span>`;
+    else out += `<span class="n">${num}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(json.slice(last));
+}
+
+// One entry per file, with its manifest case
+const entries = [];
+for (const c of DATA.manifest.cases) {
+  const list = Array.isArray(c.file) ? c.file : [c.file];
+  list.forEach((file, i) => entries.push({ file, c, part: list.length > 1 ? `${i + 1} of ${list.length}` : null }));
+}
+
+const meta = document.getElementById('meta');
+meta.textContent = `Spec ${DATA.manifest.specVersion} · ${entries.length} files · generated ${new Date(DATA.manifest.generatedAt).toLocaleString()}`;
+
+const list = document.getElementById('list');
+const detail = document.getElementById('detail');
+
+function renderList(active) {
+  const groups = [['valid', 'Should be accepted'], ['invalid', 'Should be rejected']];
+  list.innerHTML = groups.map(([dir, label]) => `
+    <h2>${label}</h2>
+    ${entries.map((e, i) => e.file.startsWith(dir + '/') ? `
+      <button data-i="${i}" aria-current="${i === active}">
+        <span class="file">${esc(e.file.replace(dir + '/', ''))}</span>
+        <span class="title">${esc(e.c.title || e.c.expect)}</span>
+      </button>` : '').join('')}
+  `).join('');
+  list.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => show(+b.dataset.i)));
+}
+
+function show(i) {
+  const e = entries[i];
+  const inv = DATA.files[e.file];
+  const invalid = e.file.startsWith('invalid/');
+  const json = JSON.stringify(inv, null, 2);
+  const d = inv.Discount || {};
+  const sellerTypes = { '0': 'VAT', '1': 'Non-VAT', '2': 'Registered Business Enterprise' };
+  const docTypes = { '01': 'Invoice', '06': 'Adjustment (void/return/cancel)' };
+  // CRM/POS e-invoices carry totals only — show them in the spec's order
+  const amountRows = [
+    ['VATable sales', 'VATSales', inv.VATSales], ['Other taxable revenue', 'OtherTaxRev', inv.OtherTaxRev],
+    ['VAT-exempt sales', 'ExemptSales', inv.ExemptSales], ['Zero-rated sales', 'ZeroSales', inv.ZeroSales],
+    ['Total sales (excl. VAT)', 'TotSalesAmt', inv.TotSalesAmt, true],
+    ['Less: senior citizen discount', 'Discount.ScAmt', d.ScAmt], ['Less: PWD discount', 'Discount.PwdAmt', d.PwdAmt],
+    ['Less: regular discount', 'Discount.RegAmt', d.RegAmt], ['Less: special discount', 'Discount.SpeAmt', d.SpeAmt],
+    ['Net sales after discount', 'TotNetSalesAftDisct', inv.TotNetSalesAftDisct, true], ['VAT', 'VATAmt', inv.VATAmt],
+    ['Net amount payable', 'NetAmtPay', inv.NetAmtPay, true],
+  ].filter((r) => typeof r[2] === 'number');
+
+  detail.innerHTML = `
+    <div class="card">
+      <span class="badge ${invalid ? 'bad' : 'ok'}">${invalid ? 'Expect: REJECT' : 'Expect: ACCEPT'}</span>
+      ${e.part ? `<span class="muted"> · e-invoice ${e.part}</span>` : ''}
+      <h3 style="margin-top:8px">${esc(e.c.title || e.file)}</h3>
+      <p class="expect">${esc(e.c.expect)}</p>
+      <div class="stats">
+        <div class="stat"><b>${esc(inv.DocType ?? '—')}</b><span>DocType · ${esc(docTypes[inv.DocType] || '?')}</span></div>
+        <div class="stat"><b>${esc(inv.SellerInfo?.Type ?? '—')}</b><span>Seller type · ${esc(sellerTypes[inv.SellerInfo?.Type] || '?')}</span></div>
+        <div class="stat"><b>${peso(inv.NetAmtPay)}</b><span>Net amount payable</span></div>
+        ${typeof e.c.amountPaid === 'number' ? `<div class="stat"><b>${peso(e.c.amountPaid)}</b><span>Customer paid</span></div>` : ''}
+        <div class="stat"><b style="font-size:12px;font-family:ui-monospace,monospace">${esc(inv.EisUniqueId ?? '—')}</b><span>EisUniqueId</span></div>
+        ${inv.CorrYN === 'Y' ? `<div class="stat"><b style="font-size:12px;font-family:ui-monospace,monospace">${esc(inv.PrevUniqueId)}</b><span>Corrects (PrevUniqueId) · code ${esc(inv.CorrectionCd)}</span></div>` : ''}
+      </div>
+    </div>
+
+    ${amountRows.length ? `
+    <div class="card">
+      <h3>Amounts <span class="muted" style="font-weight:400">(CRM/POS e-invoices have totals only, no item list)</span></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Amount</th><th>Field</th><th>Value</th></tr></thead>
+        <tbody>${amountRows.map(([label, field, value, bold]) => `<tr${bold ? ' style="font-weight:700"' : ''}><td>${esc(label)}</td><td class="muted" style="font-family:ui-monospace,monospace;font-size:12px">${esc(field)}</td><td>${peso(value)}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="muted" style="margin:10px 0 0;font-size:12px">Machine: PTU ${esc(inv.PtuNum ?? '—')} · MIN ${esc(inv.Min ?? '—')} · MSN ${esc(inv.Msn ?? '—')}</p>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="json-head"><h3>JSON <span class="muted" style="font-weight:400">${esc(e.file)}</span></h3><button id="copy">Copy JSON</button></div>
+      <pre>${highlight(json)}</pre>
+    </div>`;
+
+  document.getElementById('copy').addEventListener('click', async (ev) => {
+    try { await navigator.clipboard.writeText(json); ev.target.textContent = 'Copied ✓'; }
+    catch { ev.target.textContent = 'Copy failed'; }
+    setTimeout(() => (ev.target.textContent = 'Copy JSON'), 1500);
+  });
+  renderList(i);
+  try { history.replaceState(null, '', '#' + encodeURIComponent(e.file)); } catch {}
+}
+
+const start = Math.max(0, entries.findIndex((e) => '#' + encodeURIComponent(e.file) === location.hash));
+renderList(start);
+show(start);
+</script>
+</body>
+</html>
