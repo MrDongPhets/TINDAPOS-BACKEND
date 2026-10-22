@@ -45,6 +45,9 @@ async function getAllSales(req: Request, res: Response): Promise<void> {
       .select(`
         id,
         receipt_number,
+        or_number,
+        adjustment_status,
+        refunded_amount,
         total_amount,
         subtotal,
         discount_amount,
