@@ -361,6 +361,44 @@ export function initializeSQLiteSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- E-invoicing through an ESP (same as migrations/eis_invoices.sql)
+    CREATE TABLE IF NOT EXISTS eis_connections (
+      company_id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL DEFAULT 'taxtrail',
+      base_url TEXT NOT NULL,
+      api_key_enc TEXT NOT NULL,
+      api_key_last4 TEXT,
+      webhook_secret_enc TEXT,
+      last_checked_at TEXT,
+      last_check_ok INTEGER,
+      last_check_message TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS eis_invoices (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      company_id TEXT NOT NULL,
+      store_id TEXT NOT NULL,
+      sale_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'invoice',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      request_body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      esp_invoice_id TEXT,
+      esp_invoice_no TEXT,
+      esp_totals TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT DEFAULT (datetime('now')),
+      last_error TEXT,
+      last_http_status INTEGER,
+      issued_at TEXT,
+      status_changed_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS eis_invoices_one_invoice_per_sale ON eis_invoices(sale_id) WHERE kind = 'invoice';
+
     -- Staff WebAuthn Credentials
     CREATE TABLE IF NOT EXISTS staff_webauthn_credentials (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

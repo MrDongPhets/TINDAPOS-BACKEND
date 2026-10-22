@@ -29,6 +29,13 @@ BEGIN
 
   -- Sales + credit
   DELETE FROM credit_ledger WHERE company_id = p_company_id OR sale_id = ANY(v_sale_ids);
+  -- E-invoice links + ESP connection (eis_invoices.sql). Guarded so this works before that migration is run.
+  IF to_regclass('public.eis_invoices') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM eis_invoices WHERE company_id = $1 OR sale_id = ANY($2) OR store_id = ANY($3)' USING p_company_id, v_sale_ids, v_store_ids;
+  END IF;
+  IF to_regclass('public.eis_connections') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM eis_connections WHERE company_id = $1' USING p_company_id;
+  END IF;
   DELETE FROM sales_items   WHERE sales_id = ANY(v_sale_ids) OR product_id = ANY(v_product_ids);
   DELETE FROM sales         WHERE id = ANY(v_sale_ids);
   DELETE FROM customers     WHERE company_id = p_company_id;
