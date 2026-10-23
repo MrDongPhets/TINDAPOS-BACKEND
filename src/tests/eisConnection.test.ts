@@ -34,6 +34,7 @@ describe('normalizeBaseUrl', () => {
   it('accepts https, and http only for localhost', () => {
     expect(normalizeBaseUrl('https://taxtrail.example.com/')).toEqual({ value: 'https://taxtrail.example.com' })
     expect(normalizeBaseUrl('http://localhost:3001')).toEqual({ value: 'http://localhost:3001' })
+    expect(normalizeBaseUrl('http://host.docker.internal:3002')).toEqual({ value: 'http://host.docker.internal:3002' })
     expect(normalizeBaseUrl('http://taxtrail.example.com').error).toMatch(/https/)
     expect(normalizeBaseUrl('https://taxtrail.example.com/api/v1').error).toMatch(/no path/)
     expect(normalizeBaseUrl('not a url').error).toBeDefined()

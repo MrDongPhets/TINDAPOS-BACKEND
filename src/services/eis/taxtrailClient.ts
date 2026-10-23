@@ -19,12 +19,12 @@ export interface WhoAmI {
   software?: string;
 }
 
-// https only, except http on localhost / 127.0.0.1 for local testing; trailing slash removed
+// https only, except http on localhost / 127.0.0.1 / host.docker.internal (your PC, seen from Docker) for local testing
 export function normalizeBaseUrl(input: unknown): { value: string; error?: string } {
   const raw = String(input ?? '').trim().replace(/\/+$/, '');
   let url: URL;
   try { url = new URL(raw); } catch { return { value: raw, error: 'Enter the full TaxTrail address, e.g. https://taxtrail.example.com' }; }
-  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  const local = ['localhost', '127.0.0.1', 'host.docker.internal'].includes(url.hostname);
   if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) return { value: raw, error: 'The TaxTrail address must start with https://' };
   if (url.pathname.replace(/\/+$/, '') !== '' || url.search || url.hash) return { value: raw, error: 'Enter only the address (no path), e.g. https://taxtrail.example.com' };
   return { value: `${url.protocol}//${url.host}` };
