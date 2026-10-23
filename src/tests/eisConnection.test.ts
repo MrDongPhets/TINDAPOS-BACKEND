@@ -57,8 +57,12 @@ describe('describeWhoAmI', () => {
   it('ok when the key can issue invoices', () => {
     expect(describeWhoAmI(base)).toEqual({ ok: true, message: 'Connected to Sandbox Store (TIN 900000001) · test key · can issue invoices' })
   })
+  it("names TaxTrail's reasons when issuing is blocked", () => {
+    const blocked = { ...base, operations: { ...base.operations, issueInvoice: { allowed: false, failures: [{ gate: 'G2', code: 'PTI_NOT_ACTIVE', message: 'The taxpayer has no Permit to Issue in force' }] } } }
+    expect(describeWhoAmI(blocked)).toEqual({ ok: false, message: "Connected to Sandbox Store (TIN 900000001) (test), but TaxTrail doesn't allow issuing invoices yet: The taxpayer has no Permit to Issue in force." })
+  })
   it('not ok without the scope or when TaxTrail blocks issuing', () => {
     expect(describeWhoAmI({ ...base, scopes: ['invoices:read'] }).ok).toBe(false)
-    expect(describeWhoAmI({ ...base, operations: { ...base.operations, issueInvoice: { allowed: false, failures: ['PTI_NOT_ACTIVE'] } } }).message).toMatch(/doesn't allow/)
+    expect(describeWhoAmI({ ...base, operations: { ...base.operations, issueInvoice: { allowed: false, failures: [{ gate: 'G2', code: 'PTI_NOT_ACTIVE' }] } } }).message).toMatch(/doesn't allow/)
   })
 })

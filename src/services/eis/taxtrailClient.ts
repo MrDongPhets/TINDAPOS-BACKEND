@@ -10,12 +10,15 @@ export interface EspResponse<T = unknown> {
   retryAfterSec?: number;
 }
 
+export interface WhoAmIFailure { gate?: string; code?: string; message?: string }
+
 export interface WhoAmI {
   keyId: string;
   environment: 'test' | 'live' | string;
   scopes: string[];
   tenant: { id: string; tin: string; registeredName: string; serviceModel: string | null };
-  operations: { issueInvoice: { allowed: boolean; failures: unknown[] }; submitSales: { allowed: boolean; failures: unknown[] } };
+  // failures: TaxTrail's gates (G1 ESP authorized, G2 Permit to Issue, G3 taxpayer + service model, or the key's scope)
+  operations: { issueInvoice: { allowed: boolean; failures: WhoAmIFailure[] }; submitSales: { allowed: boolean; failures: WhoAmIFailure[] } };
   software?: string;
 }
 
@@ -75,6 +78,10 @@ export function describeWhoAmI(w: WhoAmI): { ok: boolean; message: string } {
   const who = `${w.tenant?.registeredName || 'Taxpayer'} (TIN ${w.tenant?.tin || '—'})`;
   const env = w.environment === 'live' ? 'live' : 'test';
   if (!w.scopes?.includes('invoices:write')) return { ok: false, message: `Connected to ${who}, but this key can't issue invoices (missing invoices:write).` };
-  if (!issue?.allowed) return { ok: false, message: `Connected to ${who} (${env}), but TaxTrail doesn't allow issuing invoices yet.` };
+  if (!issue?.allowed) {
+    // Say exactly what TaxTrail blocks on, so the owner knows what to ask TaxTrail for
+    const why = (issue?.failures || []).map((f) => f.message || f.code).filter(Boolean).join('; ');
+    return { ok: false, message: `Connected to ${who} (${env}), but TaxTrail doesn't allow issuing invoices yet${why ? `: ${why}` : ''}.` };
+  }
   return { ok: true, message: `Connected to ${who} · ${env} key · can issue invoices` };
 }
