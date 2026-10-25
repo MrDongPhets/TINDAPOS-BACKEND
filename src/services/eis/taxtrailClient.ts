@@ -33,6 +33,13 @@ export function normalizeBaseUrl(input: unknown): { value: string; error?: strin
   return { value: `${url.protocol}//${url.host}` };
 }
 
+// Local Docker only (docker-compose sets ESP_LOCALHOST_ALIAS=host.docker.internal): inside the container "localhost"
+// is the container itself, so a TaxTrail running on the developer's PC at http://localhost:3001 is reached via the alias.
+export function resolveEspUrl(baseUrl: string, alias = process.env.ESP_LOCALHOST_ALIAS): string {
+  if (!alias) return baseUrl;
+  return baseUrl.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/, `$1${alias}`);
+}
+
 export const API_KEY_PATTERN = /^sk_(test|live)_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/;
 
 export async function espRequest<T>(opts: {
@@ -41,7 +48,7 @@ export async function espRequest<T>(opts: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);
   try {
-    const res = await fetch(`${opts.baseUrl}/api${opts.path}`, {
+    const res = await fetch(`${resolveEspUrl(opts.baseUrl)}/api${opts.path}`, {
       method: opts.method,
       signal: controller.signal,
       headers: {

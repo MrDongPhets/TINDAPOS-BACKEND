@@ -2,7 +2,7 @@
  * E-invoicing connection helpers — Invoicing plan P2-3
  */
 import { decryptSecret, encryptSecret, encryptionConfigured } from '../services/eis/secretBox'
-import { API_KEY_PATTERN, describeWhoAmI, normalizeBaseUrl, type WhoAmI } from '../services/eis/taxtrailClient'
+import { API_KEY_PATTERN, describeWhoAmI, normalizeBaseUrl, resolveEspUrl, type WhoAmI } from '../services/eis/taxtrailClient'
 
 describe('secretBox', () => {
   const saved = process.env.EIS_ENCRYPTION_KEY
@@ -38,6 +38,16 @@ describe('normalizeBaseUrl', () => {
     expect(normalizeBaseUrl('http://taxtrail.example.com').error).toMatch(/https/)
     expect(normalizeBaseUrl('https://taxtrail.example.com/api/v1').error).toMatch(/no path/)
     expect(normalizeBaseUrl('not a url').error).toBeDefined()
+  })
+})
+
+describe('resolveEspUrl (local Docker)', () => {
+  it('sends localhost to the PC only when the alias is set', () => {
+    expect(resolveEspUrl('http://localhost:3001', 'host.docker.internal')).toBe('http://host.docker.internal:3001')
+    expect(resolveEspUrl('http://127.0.0.1:3001', 'host.docker.internal')).toBe('http://host.docker.internal:3001')
+    expect(resolveEspUrl('http://localhost:3001', undefined)).toBe('http://localhost:3001')
+    expect(resolveEspUrl('https://taxtrail.example.com', 'host.docker.internal')).toBe('https://taxtrail.example.com')
+    expect(resolveEspUrl('http://localhostevil.com', 'host.docker.internal')).toBe('http://localhostevil.com')
   })
 })
 
