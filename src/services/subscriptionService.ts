@@ -12,12 +12,12 @@ interface PlanConfig {
 const PLAN_CONFIG: Record<string, PlanConfig> = {
   negosyo: {
     max_stores: 1,
-    price_amount: 299,
+    price_amount: 199,
     features: { pos: true, reports: false, inventory: true, multi_store: false },
   },
   'laking-negosyo': {
     max_stores: 5,
-    price_amount: 599,
+    price_amount: 399,
     features: { pos: true, reports: true, inventory: true, multi_store: true },
   },
   // Legacy plan IDs (backward compat)

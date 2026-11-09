@@ -6,10 +6,10 @@ import { syncSubscription } from '../../services/subscriptionService';
 const PAYMONGO_BASE = 'https://api.paymongo.com/v1';
 
 const PLANS: Record<string, { name: string; amount: number; months: number }> = {
-  'negosyo-monthly':       { name: 'Negosyo Plan – 1 Month',        amount: 29900, months: 1 },
-  'negosyo-quarterly':     { name: 'Negosyo Plan – 3 Months',       amount: 84900, months: 3 },
-  'laking-negosyo-monthly':    { name: 'Laking Negosyo Plan – 1 Month',    amount: 59900, months: 1 },
-  'laking-negosyo-quarterly':  { name: 'Laking Negosyo Plan – 3 Months',   amount: 169900, months: 3 },
+  'negosyo-monthly':       { name: 'Negosyo Plan – 1 Month',        amount: 19900, months: 1 },
+  'negosyo-quarterly':     { name: 'Negosyo Plan – 3 Months',       amount: 56900, months: 3 },
+  'laking-negosyo-monthly':    { name: 'Laking Negosyo Plan – 1 Month',    amount: 39900, months: 1 },
+  'laking-negosyo-quarterly':  { name: 'Laking Negosyo Plan – 3 Months',   amount: 113900, months: 3 },
 };
 
 function paymongoAuth() {
